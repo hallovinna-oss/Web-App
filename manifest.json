@@ -1,0 +1,18 @@
+{
+  "name": "MIPHA COMPANION — SMK Bhumi Phala Parakan",
+  "short_name": "MIPHA",
+  "description": "Aplikasi pendamping kelas X DKV F dengan sinkronisasi Firebase",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#3b0764",
+  "theme_color": "#581c87",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

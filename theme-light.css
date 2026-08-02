@@ -1,0 +1,40 @@
+/* MIPHA COMPANION — Light theme only */
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg-main: #fcf7fe;
+  --bg-card: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-muted: #faf5ff;
+  --text-main: #2e1065;
+  --text-muted: #6b21a8;
+  --text-light: #a855f7;
+  --border-light: #f3e8ff;
+  --primary-soft: #faf5ff;
+  --accent-magenta-soft: #fdf4ff;
+  --status-success-bg: #ecfdf5;
+  --status-warning-bg: #fef9c3;
+  --status-info-bg: #faf5ff;
+  --status-danger-bg: #fef2f2;
+  --status-purple-bg: #fdf4ff;
+}
+html[data-theme="light"] body,
+html[data-theme="light"] .login-container { background: var(--bg-main); color: var(--text-main); }
+html[data-theme="light"] .card,
+html[data-theme="light"] .login-card,
+html[data-theme="light"] .mipha-module,
+html[data-theme="light"] .summary-strip > div,
+html[data-theme="light"] .student-dashboard-card,
+html[data-theme="light"] .schedule-card,
+html[data-theme="light"] .stat-card,
+html[data-theme="light"] .modal-content,
+html[data-theme="light"] .table-responsive,
+html[data-theme="light"] .family-preview { background: var(--bg-card); color: var(--text-main); }
+html[data-theme="light"] .nav-item { color: var(--text-muted); }
+html[data-theme="light"] .nav-item:hover { background: var(--primary-soft); color: var(--primary-dark); }
+html[data-theme="light"] .bottom-nav { background: rgba(255,255,255,.96); border-color: var(--border-light); }
+html[data-theme="light"] .btn-secondary { background: #fff; color: var(--primary-dark); border-color: var(--border-light); }
+html[data-theme="light"] .btn-secondary:hover { background: var(--primary-soft); color: var(--primary-dark); }
+html[data-theme="light"] .brand-logo-light { display:block; }
+html[data-theme="light"] .brand-logo-dark { display:none; }
+html[data-theme="light"] .login-logo-light { display:block; }
+html[data-theme="light"] .login-logo-dark { display:none; }

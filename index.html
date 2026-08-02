@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#581c87">
+  <meta name="description" content="MIPHA COMPANION — Teacher workspace, home visits, assignments and student support">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>MIPHA COMPANION — Digital Homeroom Teacher Platform</title>
+  
+  <!-- Web App Manifest -->
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/png" href="./logo.png">
+  
+  <!-- System Font Fallback & Stylesheet -->
+  <link rel="stylesheet" href="./styles.css?v=rc4">
+  <link rel="stylesheet" href="./theme-light.css?v=rc4">
+  <link rel="stylesheet" href="./styles-mobile.css" media="(max-width:720px)">
+</head>
+<body>
+  <div id="mipha-splash" class="mipha-splash" aria-label="Loading MIPHA Companion">
+    <div class="splash-orb splash-orb-a"></div>
+    <div class="splash-orb splash-orb-b"></div>
+    <div class="splash-content">
+      <div class="splash-mark"><img class="splash-logo splash-logo-light" src="./moncer-white.png" alt="MONCER" loading="lazy"><img class="splash-logo splash-logo-dark" src="./moncer-blue.png" alt="MONCER" loading="lazy"></div>
+      <div class="splash-divider"></div>
+      <h1>MIPHA COMPANION</h1>
+      <p>Observe · Understand · Support</p>
+      <span>MIPHA Companion v1.0 RC4 · Production Edition</span>
+    </div>
+  </div>
+  <div id="app-container">
+    <!-- Rendered dynamically by app.js -->
+  </div>
+
+  <script>
+    (function () {
+      localStorage.setItem('mipha_theme', 'light');
+      document.documentElement.dataset.theme = 'light';
+      document.documentElement.dataset.themePreference = 'light';
+      window.addEventListener('load', () => {
+        window.setTimeout(() => document.getElementById('mipha-splash')?.classList.add('splash-exit'), 3200);
+        window.setTimeout(() => document.getElementById('mipha-splash')?.remove(), 3900);
+      });
+    })();
+  </script>
+
+  <!-- Firebase SDK (Auth + Firestore; Storage intentionally omitted) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script type="module" src="./config/campuses.js"></script>
+  <script type="module" src="./src/config/index.js"></script>
+  <script type="module" src="./src/firebase/firebase-backend.js"></script>
+  <script type="module" src="./src/attendance/attendance-engine.js"></script>
+  <script src="./firebase-init.js?v=rc4"></script>
+  <script src="./config.js?v=rc4"></script>
+  <script src="./lib/geo-utils.js?v=rc4"></script>
+  <script src="./attendance-engine.js?v=rc4"></script>
+  <!-- XLSX library is loaded on-demand to reduce initial mobile payload -->
+
+  <!-- Application Engine -->
+  <script src="./app.js?v=rc4"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=rc4').catch(console.error));
+    }
+  </script>
+</body>
+</html>

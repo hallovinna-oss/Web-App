@@ -1,0 +1,18 @@
+{
+  "campuses": [
+    {
+      "id": "campus-1",
+      "name": "SMK Bhumi Phala Parakan",
+      "lat": -6.200000,
+      "lng": 106.816666,
+      "radiusMeters": 75
+    },
+    {
+      "id": "campus-2",
+      "name": "SMK Bhumi Phala Parakan (Secondary)",
+      "lat": -7.282467,
+      "lng": 110.096915,
+      "radiusMeters": 75
+    }
+  ]
+}
