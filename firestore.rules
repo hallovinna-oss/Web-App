@@ -5,7 +5,7 @@ service cloud.firestore {
     function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function isTeacher() { return signedIn() && me().data.role == 'guru'; }
     function validAttendanceStatus() {
-      return request.resource.data.status in ['tepat_waktu', 'terlambat', 'sakit', 'izin', 'alpha'];
+      return request.resource.data.status in ['tepat_waktu', 'sakit', 'izin', 'alpha'];
     }
 
     match /users/{uid} {

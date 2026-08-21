@@ -55,8 +55,7 @@
     // has checkin
     const checkinDate = new Date(checkinTime);
     const checkinMinutes = checkinDate.getHours() * 60 + checkinDate.getMinutes();
-    if (checkinMinutes <= deadlineMinutes) return { code: 'tepat_waktu', label: 'Present' };
-    return { code: 'terlambat', label: 'Late' };
+    return { code: 'tepat_waktu', label: 'Hadir' };
   }
 
   function findNearestCampus(lat, lon, campuses) {

@@ -16,7 +16,6 @@ const SCHOOL_CONFIG = MIPHA_APP_CONFIG.school || {
   radiusMeters: 100,
   onTimeLimitHour: 7,
   onTimeLimitMinute: 0,
-  lateLimitMinute: 10,
   dismissalHour: 15,
   dismissalMinute: 45,
   backupPin: '7575'
@@ -375,6 +374,11 @@ const AppState = {
     } else {
       this.attendance = this.safeJSONParse('dkvf_attendance', this.generateEmptyDailyAttendance());
     }
+    Object.values(this.attendance || {}).forEach((record) => {
+      if (record && ['terlambat', 'late', 'l'].includes(String(record.status || '').toLowerCase())) {
+        record.status = 'tepat_waktu';
+      }
+    });
     this.leaveRequests = this.safeJSONParse('dkvf_leave_requests', this.generateSampleLeaves());
     this.monthlyAttendance = this.safeJSONParse('dkvf_monthly_attendance', this.generateMonthlyAttendanceSeed());
     this.historicalAttendance = this.safeJSONParse('dkvf_historical_attendance', {});
@@ -548,7 +552,7 @@ const AppState = {
   monthlyStatusFromAttendance(status) {
     const normalized = String(status || '').trim().toLowerCase();
     if (normalized === 'tepat_waktu' || normalized === 'hadir') return 'tepat_waktu';
-    if (normalized === 'terlambat' || normalized === 'late') return 'terlambat';
+    if (normalized === 'terlambat' || normalized === 'late' || normalized === 'l') return 'tepat_waktu';
     if (normalized === 'sakit') return 'sakit';
     if (normalized === 'izin' || normalized === 'permission' || normalized === 'lom' || normalized.includes('lom')) return 'izin';
     if (normalized === 'alpha') return 'alpha';
@@ -612,10 +616,10 @@ const AppState = {
     const historical = this.historicalAttendance || {};
     const monthly = this.monthlyAttendance || {};
     if (historical[studentId] && typeof historical[studentId][dateKey] !== 'undefined') {
-      return historical[studentId][dateKey];
+      return this.monthlyStatusFromAttendance(historical[studentId][dateKey]);
     }
     if (monthly[studentId] && typeof monthly[studentId][dateKey] !== 'undefined') {
-      return monthly[studentId][dateKey];
+      return this.monthlyStatusFromAttendance(monthly[studentId][dateKey]);
     }
     if (!this.isSchoolDayDate(d)) {
       if (d < this.parseLocalDate(ACADEMIC_ATTENDANCE_START)) return 'before_start';
@@ -630,20 +634,19 @@ const AppState = {
 
   calculateStudentAttendanceSummary(studentId, year, month) {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    let present = 0, late = 0, sick = 0, izin = 0, alpha = 0, schoolDays = 0;
+    let present = 0, sick = 0, izin = 0, alpha = 0, schoolDays = 0;
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month, d);
       const status = this.attendanceStatusForDate(studentId, date);
       if (!this.isSchoolDayDate(date)) continue;
       schoolDays += 1;
       if (status === 'tepat_waktu') present += 1;
-      else if (status === 'terlambat') late += 1;
       else if (status === 'sakit') sick += 1;
       else if (status === 'izin') izin += 1;
       else if (status === 'alpha') alpha += 1;
     }
-    const percentage = schoolDays > 0 ? Math.round(((present + late) / schoolDays) * 100) : 100;
-    return { present, late, sick, izin, alpha, schoolDays, percentage };
+    const percentage = schoolDays > 0 ? Math.round((present / schoolDays) * 100) : 100;
+    return { present, sick, izin, alpha, schoolDays, percentage };
   },
 
   calculateAttendanceStreak(studentId, asOfDate = new Date()) {
@@ -653,7 +656,7 @@ const AppState = {
     for (let d = new Date(today); d >= new Date(ACADEMIC_ATTENDANCE_START + 'T00:00:00'); d.setDate(d.getDate() - 1)) {
       if (!this.isSchoolDayDate(d)) continue;
       const status = this.attendanceStatusForDate(studentId, d);
-      if (status === 'tepat_waktu' || status === 'terlambat') {
+      if (status === 'tepat_waktu') {
         streak += 1;
       } else {
         break;
@@ -759,7 +762,7 @@ const AppState = {
             if (res && res.code) status = res.code;
           } else if (checkinTime) {
             status = (checkinTime.indexOf('06:') === 0 || checkinTime.indexOf('07:0') === 0)
-              ? (checkinTime.indexOf('06:') === 0 ? 'tepat_waktu' : 'terlambat')
+              ? 'tepat_waktu'
               : 'tepat_waktu';
           }
         }
@@ -773,7 +776,7 @@ const AppState = {
         status: status,
         checkinTime: checkinTime,
         checkinMethod: (status !== 'belum_checkin' && status !== 'sakit' && status !== 'izin') ? 'gps' : null,
-        distanceMeters: status === 'tepat_waktu' ? 35 : (status === 'terlambat' ? 52 : null),
+        distanceMeters: status === 'tepat_waktu' ? 35 : null,
         checkoutTime: isHomeConfirmed ? '15:48 WIB' : null,
         homeConfirmed: isHomeConfirmed,
         homeArrivalTime: isHomeConfirmed ? '16:15 WIB' : null
@@ -799,9 +802,7 @@ const AppState = {
       const result = AttendanceEngine.determineStatus({ checkinTime: isoCheckin, now, config: SCHOOL_CONFIG });
       status = result && result.code ? result.code : 'tepat_waktu';
     } else {
-      status = (now.getHours() > SCHOOL_CONFIG.onTimeLimitHour || (now.getHours() === SCHOOL_CONFIG.onTimeLimitHour && now.getMinutes() > SCHOOL_CONFIG.onTimeLimitMinute))
-        ? 'terlambat'
-        : 'tepat_waktu';
+      status = 'tepat_waktu';
     }
 
     const distance = customDistance !== null ? customDistance : Math.floor(Math.random() * 45) + 15;
@@ -1011,7 +1012,7 @@ const AppState = {
     if (!this.currentUser || this.currentUser.role !== 'guru') return;
     if (!this.students.find((s) => s.id === studentId)) return;
     const currentStatus = this.attendanceStatusForDate(studentId, date);
-    const cycle = ['no_record', 'alpha', 'tepat_waktu', 'terlambat', 'sakit', 'izin'];
+    const cycle = ['no_record', 'alpha', 'tepat_waktu', 'sakit', 'izin'];
     const currentIndex = cycle.indexOf(currentStatus);
     const normalizedIndex = currentIndex === -1 ? 0 : currentIndex;
     const nextStatus = cycle[(normalizedIndex + 1) % cycle.length];
@@ -1378,7 +1379,6 @@ const AppState = {
     const att = this.attendance[student.id] || {};
     const statusBadges = {
       'tepat_waktu': '<span class="badge badge-success">✅ Tepat Waktu</span>',
-      'terlambat': '<span class="badge badge-warning">⏰ Terlambat</span>',
       'sakit': '<span class="badge badge-info">🩺 Sakit</span>',
       'izin': '<span class="badge badge-info">📝 Izin</span>',
       'belum_checkin': '<span class="badge badge-danger">⏳ Belum Check-in</span>'
@@ -1502,7 +1502,6 @@ const AppState = {
     const allAtt = Object.values(this.attendance);
     const total = this.students.length;
     const hadir = allAtt.filter(a => a.status === 'tepat_waktu').length;
-    const terlambat = allAtt.filter(a => a.status === 'terlambat').length;
     const izinSakit = allAtt.filter(a => a.status === 'sakit' || a.status === 'izin').length;
     const belumCheckin = allAtt.filter(a => a.status === 'belum_checkin').length;
     const confirmedHome = allAtt.filter(a => a.homeConfirmed).length;
@@ -1518,10 +1517,6 @@ const AppState = {
         <div class="card" style="padding: 0.85rem; text-align: center; border-left: 4px solid var(--status-success);">
           <div style="font-size: 1.4rem; font-weight: 800; color: var(--status-success);">${hadir}</div>
           <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">Tepat Waktu</div>
-        </div>
-        <div class="card" style="padding: 0.85rem; text-align: center; border-left: 4px solid var(--status-warning);">
-          <div style="font-size: 1.4rem; font-weight: 800; color: var(--status-warning);">${terlambat}</div>
-          <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">Terlambat</div>
         </div>
         <div class="card" style="padding: 0.85rem; text-align: center; border-left: 4px solid var(--status-info);">
           <div style="font-size: 1.4rem; font-weight: 800; color: var(--status-info);">${izinSakit}</div>
@@ -1585,7 +1580,7 @@ const AppState = {
       <div class="mipha-grid">
         <button class="mipha-module urgent" data-view="home_visits"><span>🏡</span><b>Home Visit Center</b><small>${this.homeVisits.filter(v=>v.status!=='completed').length} visits need action</small></button>
         <button class="mipha-module" data-view="assignments"><span>📚</span><b>Assignment Center</b><small>${this.assignments.reduce((n,a)=>n+(a.total-a.submitted),0)} missing submissions</small></button>
-        <button class="mipha-module warning" data-view="students"><span>🚨</span><b>Student Warning</b><small>${allAtt.filter(a=>['terlambat','sakit','izin','belum_checkin'].includes(a.status)).length} students flagged today</small></button>
+        <button class="mipha-module warning" data-view="students"><span>🚨</span><b>Student Warning</b><small>${allAtt.filter(a=>['sakit','izin','belum_checkin'].includes(a.status)).length} students flagged today</small></button>
         <button class="mipha-module ai" data-view="ai_assistant"><span>🤖</span><b>AI Teacher Assistant</b><small>Create summaries and reports</small></button>
       </div>
 
@@ -1617,7 +1612,6 @@ const AppState = {
                 const a = this.attendance[st.id] || {};
                 const badges = {
                   'tepat_waktu': '<span class="badge badge-success">Tepat Waktu</span>',
-                  'terlambat': '<span class="badge badge-warning">Terlambat</span>',
                   'sakit': '<span class="badge badge-info">Sakit</span>',
                   'izin': '<span class="badge badge-info">Izin</span>',
                   'belum_checkin': '<span class="badge badge-danger">Belum Check-in</span>'
@@ -1755,7 +1749,7 @@ const AppState = {
     const todayBoundary = this.parseLocalDate(this.getTodayKey());
 
     const matrix = this.students.map(student => {
-      let countS = 0, countI = 0, countA = 0, countH = 0, countLate = 0, schoolDaysTotal = 0;
+      let countS = 0, countI = 0, countA = 0, countH = 0, schoolDaysTotal = 0;
       const days = [];
 
       for (let d = 1; d <= daysInMonth; d++) {
@@ -1768,7 +1762,6 @@ const AppState = {
         if (isSchoolDay) {
           schoolDaysTotal += 1;
           if (status === 'tepat_waktu') countH += 1;
-          else if (status === 'terlambat') countLate += 1;
           else if (status === 'sakit') countS += 1;
           else if (status === 'izin') countI += 1;
           else if (status === 'alpha') countA += 1;
@@ -1777,9 +1770,9 @@ const AppState = {
         days.push({ d, status, isSchoolDay });
       }
 
-      const attended = countH + countLate;
+      const attended = countH;
       const pct = schoolDaysTotal > 0 ? Math.round((attended / schoolDaysTotal) * 100) : 100;
-      return { student, days, countS, countI, countA, countH, countLate, schoolDaysTotal, pct, daysInMonth };
+      return { student, days, countS, countI, countA, countH, schoolDaysTotal, pct, daysInMonth };
     });
 
     return { matrix, daysInMonth, year, month };
@@ -1797,7 +1790,6 @@ const AppState = {
     const totalStudents = this.students.length;
     const avgPct = Math.round(matrix.reduce((sum, r) => sum + r.pct, 0) / totalStudents);
     const totalPresent = matrix.reduce((sum, r) => sum + r.countH, 0);
-    const totalLate = matrix.reduce((sum, r) => sum + r.countLate, 0);
     const totalS = matrix.reduce((sum, r) => sum + r.countS, 0);
     const totalI = matrix.reduce((sum, r) => sum + r.countI, 0);
     const totalA = matrix.reduce((sum, r) => sum + r.countA, 0);
@@ -1818,7 +1810,6 @@ const AppState = {
       if (!isSchoolDay) return 'background:#e5e7eb; color:#9ca3af;';
       switch (status) {
         case 'tepat_waktu':  return 'background:#16a34a; color:#fff;';
-        case 'terlambat':  return 'background:#0f172a; color:#fff;';
         case 'sakit':  return 'background:#eab308; color:#1a1a1a;';
         case 'izin':   return 'background:#1f2937; color:#fff;';
         case 'alpha':  return 'background:#dc2626; color:#fff;';
@@ -1832,7 +1823,6 @@ const AppState = {
       if (!isSchoolDay) return '·';
       switch (status) {
         case 'tepat_waktu':  return '✓';
-        case 'terlambat':  return 'L';
         case 'sakit':  return 'S';
         case 'izin':   return 'I';
         case 'alpha':  return 'A';
@@ -1853,11 +1843,6 @@ const AppState = {
         <div style="background:#ecfdf5;border:1.5px solid #a7f3d0;border-radius:var(--radius-md);padding:1rem;text-align:center;">
           <div style="font-size:0.72rem;font-weight:700;color:#065f46;text-transform:uppercase;">Total Present (Tepat Waktu)</div>
           <div style="font-size:1.75rem;font-weight:800;color:#16a34a;">${totalPresent}</div>
-          <div style="font-size:0.7rem;color:#6b7280;">kumulatif semua siswa</div>
-        </div>
-        <div style="background:#f3f4f6;border:1.5px solid #cbd5e1;border-radius:var(--radius-md);padding:1rem;text-align:center;">
-          <div style="font-size:0.72rem;font-weight:700;color:#1e3a8a;text-transform:uppercase;">Total Late</div>
-          <div style="font-size:1.75rem;font-weight:800;color:#1d4ed8;">${totalLate}</div>
           <div style="font-size:0.7rem;color:#6b7280;">kumulatif semua siswa</div>
         </div>
         <div style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:var(--radius-md);padding:1rem;text-align:center;">
@@ -2131,7 +2116,6 @@ const AppState = {
     const statusOptions = [
       { value: 'belum_checkin', label: 'Belum Check-in' },
       { value: 'tepat_waktu', label: 'Hadir (Tepat Waktu)' },
-      { value: 'terlambat', label: 'Hadir (Terlambat)' },
       { value: 'sakit', label: 'Sakit' },
       { value: 'izin', label: 'Izin' }
     ];
@@ -2213,7 +2197,6 @@ const AppState = {
             <label class="form-label">Jenis Izin</label>
             <select class="form-select" id="leave-type" required>
               <option value="sakit">Sakit</option>
-              <option value="terlambat">Terlambat Datang</option>
               <option value="keperluan_keluarga">Keperluan Keluarga</option>
               <option value="pulang_awal">Pulang Lebih Awal</option>
               <option value="kegiatan_sekolah">Kegiatan Sekolah / Lomba</option>
@@ -3071,7 +3054,6 @@ const AppState = {
         }
         switch (status) {
           case 'tepat_waktu':
-          case 'terlambat':
             return { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16A34A' } }, font: { color: { argb: 'FFFFFFFF' }, bold: true } };
           case 'sakit':
             return { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE047' } }, font: { color: { argb: 'FF1F2937' }, bold: true } };
@@ -3101,7 +3083,6 @@ const AppState = {
           } else {
             switch (dayInfo.status) {
               case 'tepat_waktu':
-              case 'terlambat': rowValues.push('✓'); break;
               case 'sakit': rowValues.push('S'); break;
               case 'izin': rowValues.push('I'); break;
               case 'alpha': rowValues.push('A'); break;
@@ -3110,7 +3091,7 @@ const AppState = {
           }
         }
         rowValues.push(rowData.schoolDaysTotal);
-        rowValues.push(rowData.countH + rowData.countLate);
+        rowValues.push(rowData.countH);
         rowValues.push(rowData.countS);
         rowValues.push(rowData.countI);
         rowValues.push(rowData.countA);
@@ -3337,7 +3318,7 @@ const AppState = {
               const student = this.findStudentByRawName(rawName) || studentNisMap.get(rawName);
               if (!student) continue;
               let rawRemark = String(row[remarkIndex] || '').trim();
-              if (!rawRemark && row.some((cell) => typeof cell === 'string' && /\b(lo+m|a|alpha|absen|izin|sakit|terlambat|late|hadir)\b/i.test(cell))) {
+              if (!rawRemark && row.some((cell) => typeof cell === 'string' && /\b(lo+m|a|alpha|absen|izin|sakit|hadir)\b/i.test(cell))) {
                 rawRemark = 'A';
               }
               const status = this.normalizeAttendanceStatus(rawRemark || 'A');
@@ -3567,10 +3548,10 @@ const AppState = {
     if (raw === 'alpha' || raw === 'a' || raw === 'absen') return 'alpha';
     if (raw === 'sakit' || raw === 's') return 'sakit';
     if (raw === 'izin' || raw === 'i' || raw === 'permission') return 'izin';
-    if (raw === 'terlambat' || raw === 'l' || raw === 'late') return 'terlambat';
+    if (raw === 'terlambat' || raw === 'l' || raw === 'late') return 'tepat_waktu';
     if (raw === 'lom' || raw.includes('lom')) return 'izin';
     if (raw.includes('tepat')) return 'tepat_waktu';
-    if (raw.includes('terlambat')) return 'terlambat';
+    if (raw.includes('terlambat')) return 'tepat_waktu';
     if (raw.includes('sakit')) return 'sakit';
     if (raw.includes('izin')) return 'izin';
     if (raw.includes('belum')) return 'belum_checkin';

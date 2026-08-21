@@ -13,7 +13,6 @@ window.MIPHA_CONFIG = window.MIPHA_CONFIG || {
     radiusMeters: 100,
     onTimeLimitHour: 7,
     onTimeLimitMinute: 0,
-    lateLimitMinute: 10,
     dismissalHour: 15,
     dismissalMinute: 45,
     backupPin: '7575'

@@ -33,7 +33,8 @@ const FirebaseBackend = {
 
   normalizeAttendanceStatus(status) {
     const normalized = String(status || '').trim().toLowerCase();
-    const allowed = ['tepat_waktu', 'terlambat', 'sakit', 'izin', 'alpha'];
+    if (normalized === 'terlambat' || normalized === 'late' || normalized === 'l') return 'tepat_waktu';
+    const allowed = ['tepat_waktu', 'sakit', 'izin', 'alpha'];
     return allowed.includes(normalized) ? normalized : null;
   },
 
