@@ -6,9 +6,11 @@
 window.MIPHA_CONFIG = window.MIPHA_CONFIG || {
   attendanceStart: '2026-07-13',
   school: {
-    lat: -6.200000,
-    lng: 106.816666,
-    radiusMeters: 75,
+    id: 'campus_1',
+    name: 'SMK Bhumi Phala Kampus 1',
+    lat: -7.281462945129072,
+    lng: 110.09827607588974,
+    radiusMeters: 100,
     onTimeLimitHour: 7,
     onTimeLimitMinute: 0,
     lateLimitMinute: 10,

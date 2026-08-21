@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "test": "node tools/test-geo-utils.js",
+    "check": "node --check app.js && node --check firebase-init.js && node --check attendance-engine.js && node --check sw.js"
+  },
+  "dependencies": {
+    "@netlify/functions": "^5.3.0"
+  }
+}

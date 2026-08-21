@@ -4,9 +4,20 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function isTeacher() { return signedIn() && me().data.role == 'guru'; }
+    function validAttendanceStatus() {
+      return request.resource.data.status in ['tepat_waktu', 'terlambat', 'sakit', 'izin', 'alpha'];
+    }
 
     match /users/{uid} {
-      allow read, create, update: if signedIn() && (request.auth.uid == uid || isTeacher());
+      allow read: if signedIn() && (request.auth.uid == uid || isTeacher());
+      // A client may bootstrap only its own student profile. Teacher privileges
+      // must already be provisioned by an administrator.
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'siswa';
+      allow update: if isTeacher()
+                    || (signedIn() && request.auth.uid == uid
+                        && request.resource.data.role == resource.data.role);
+      allow delete: if isTeacher();
     }
     match /students/{studentId} {
       allow read: if signedIn();
@@ -14,12 +25,18 @@ service cloud.firestore {
     }
     match /attendance/{recordId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && (isTeacher() || request.resource.data.studentId == me().data.id);
+      allow create, update: if signedIn() && validAttendanceStatus()
+                            && (isTeacher()
+                                || request.resource.data.studentId == me().data.id);
+      allow delete: if isTeacher();
     }
     match /leaveRequests/{leaveId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.studentId == me().data.id;
-      allow update: if isTeacher() || (signedIn() && resource.data.studentId == me().data.id);
+      allow update: if isTeacher()
+                    || (signedIn() && resource.data.studentId == me().data.id
+                        && request.resource.data.studentId == resource.data.studentId);
+      allow delete: if isTeacher();
     }
     match /announcements/{id} { allow read: if signedIn(); allow write: if isTeacher(); }
     match /assignments/{id} { allow read: if signedIn(); allow write: if isTeacher(); }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mipha-companion-rc4-firebase-v2';
+const CACHE_NAME = 'mipha-companion-rc4-network-first-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -41,6 +41,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isCoreAppRequest = event.request.mode === 'navigate' ||
+    ['/', '/index.html', '/app.js', '/config.js', '/firebase-init.js', '/attendance-engine.js', '/styles.css', '/theme-light.css', '/styles-mobile.css', '/sw.js'].includes(url.pathname);
+
+  if (isCoreAppRequest) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then((response) => {
+          if (response && response.ok && url.pathname !== '/sw.js') {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {

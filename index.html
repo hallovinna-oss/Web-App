@@ -50,10 +50,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script type="module" src="./config/campuses.js"></script>
-  <script type="module" src="./src/config/index.js"></script>
-  <script type="module" src="./src/firebase/firebase-backend.js"></script>
-  <script type="module" src="./src/attendance/attendance-engine.js"></script>
+  <!-- RC4 uses one browser runtime. The duplicate /src module prototype is kept
+       as reference only and must not run alongside these compatibility scripts. -->
   <script src="./firebase-init.js?v=rc4"></script>
   <script src="./config.js?v=rc4"></script>
   <script src="./lib/geo-utils.js?v=rc4"></script>
@@ -64,7 +62,7 @@
   <script src="./app.js?v=rc4"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=rc4').catch(console.error));
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(console.error));
     }
   </script>
 </body>

@@ -42,17 +42,14 @@
 
   function determineStatus({ checkinTime, now = new Date(), config = {} }) {
     // Returns app-compatible status codes used in AppState:
-    // 'tepat_waktu' (on time), 'terlambat' (late), 'belum_checkin' (missing before deadline), 'A' (absent after deadline)
+    // Missing check-in is not evidence of absence. Only an explicit, valid record
+    // may become Alpha in the application.
     const onHour = config.onTimeLimitHour ?? 7;
     const onMinute = config.onTimeLimitMinute ?? 0;
     const deadlineMinutes = onHour * 60 + onMinute;
 
     if (!checkinTime) {
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      // before deadline: still missing
-      if (nowMinutes <= deadlineMinutes) return { code: 'belum_checkin', label: 'Belum Check-in' };
-      // after deadline: absent
-      return { code: 'A', label: 'Absent' };
+      return { code: 'belum_checkin', label: 'Belum Check-in' };
     }
 
     // has checkin

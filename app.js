@@ -9,9 +9,11 @@ const MIPHA_APP_CONFIG = window.MIPHA_CONFIG || {};
 const ACADEMIC_ATTENDANCE_START = MIPHA_APP_CONFIG.attendanceStart || '2026-07-13';
 
 const SCHOOL_CONFIG = MIPHA_APP_CONFIG.school || {
-  lat: -6.200000,
-  lng: 106.816666,
-  radiusMeters: 75,
+  id: 'campus_1',
+  name: 'SMK Bhumi Phala Kampus 1',
+  lat: -7.281462945129072,
+  lng: 110.09827607588974,
+  radiusMeters: 100,
   onTimeLimitHour: 7,
   onTimeLimitMinute: 0,
   lateLimitMinute: 10,
@@ -141,13 +143,16 @@ const AppState = {
   timetables: [],
   auditLogs: [],
   monthlyAttendance: {},
+  historicalAttendance: {},
   teacherProfile: {},
   homeVisits: [],
   assignments: [],
   visitEditorOpen: false,
   editingVisitId: null,
+  activeAssignmentSubmissionId: null,
   attendanceDate: null,
   themePreference: 'light',
+  firebaseListenersStarted: false,
 
   init() {
     try {
@@ -308,17 +313,12 @@ const AppState = {
     const persisted = this.getPersistedCurrentUser();
     if (!persisted || !window.FirebaseBackend || !FirebaseBackend.auth) return;
 
-    const restore = () => {
-      this.currentUser = persisted;
-      this.render();
-    };
-
-    restore();
+    this.currentUser = persisted;
 
     FirebaseBackend.auth.onAuthStateChanged((user) => {
-      if (user) {
+      if (user && !this.firebaseListenersStarted) {
+        this.firebaseListenersStarted = true;
         FirebaseBackend.startListeners(this);
-        this.render();
       }
     });
   },
@@ -377,8 +377,12 @@ const AppState = {
     }
     this.leaveRequests = this.safeJSONParse('dkvf_leave_requests', this.generateSampleLeaves());
     this.monthlyAttendance = this.safeJSONParse('dkvf_monthly_attendance', this.generateMonthlyAttendanceSeed());
+    this.historicalAttendance = this.safeJSONParse('dkvf_historical_attendance', {});
     if (!localStorage.getItem('dkvf_monthly_attendance')) {
       localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
+    }
+    if (!localStorage.getItem('dkvf_historical_attendance')) {
+      localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
     }
     this.repairMonthlyAttendanceFromHistory();
     this.announcements = this.safeJSONParse('dkvf_announcements', [
@@ -499,15 +503,14 @@ const AppState = {
     localStorage.setItem('dkvf_leave_requests', JSON.stringify(this.leaveRequests));
     localStorage.setItem('dkvf_announcements', JSON.stringify(this.announcements));
     localStorage.setItem('dkvf_audit_logs', JSON.stringify(this.auditLogs));
+    localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
+    localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
     localStorage.setItem('mipha_teacher_profile', JSON.stringify(this.teacherProfile));
     localStorage.setItem('mipha_home_visits', JSON.stringify(this.homeVisits));
     localStorage.setItem('mipha_assignments', JSON.stringify(this.assignments));
     localStorage.setItem('mipha_attendance_date', this.attendanceDate || new Date().toISOString().split('T')[0]);
     if (this.currentUser) {
       this.persistCurrentUser();
-    }
-    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
-      FirebaseBackend.syncState(this).catch(error => console.warn('Cloud sync failed:', error));
     }
   },
 
@@ -548,58 +551,81 @@ const AppState = {
     if (normalized === 'terlambat' || normalized === 'late') return 'terlambat';
     if (normalized === 'sakit') return 'sakit';
     if (normalized === 'izin' || normalized === 'permission' || normalized === 'lom' || normalized.includes('lom')) return 'izin';
-    return 'alpha';
+    if (normalized === 'alpha') return 'alpha';
+    return 'no_record';
   },
 
   recordMonthlyAttendanceForDate(dateKey, attendanceMap) {
     if (!dateKey || !attendanceMap || typeof attendanceMap !== 'object') return;
     Object.entries(attendanceMap).forEach(([studentId, record]) => {
-      const status = this.monthlyStatusFromAttendance(record.status);
+      const status = this.monthlyStatusFromAttendance(record && record.status);
+      if (status === 'no_record') return;
       if (!this.monthlyAttendance[studentId]) this.monthlyAttendance[studentId] = {};
       this.monthlyAttendance[studentId][dateKey] = status;
+      if (!this.historicalAttendance[studentId]) this.historicalAttendance[studentId] = {};
+      this.historicalAttendance[studentId][dateKey] = status;
     });
     localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
+    localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
   },
 
   isSchoolDayDate(date) {
-    const d = new Date(date);
+    const d = typeof date === 'string' ? this.parseLocalDate(date) : new Date(date);
+    d.setHours(0, 0, 0, 0);
     const dow = d.getDay();
-    const academicStart = new Date(ACADEMIC_ATTENDANCE_START + 'T00:00:00');
+    const academicStart = this.parseLocalDate(ACADEMIC_ATTENDANCE_START);
     return dow >= 1 && dow <= 5 && d >= academicStart;
   },
 
   isAttendanceDeadlinePassed(date) {
-    const checkDate = new Date(date);
+    const checkDate = typeof date === 'string' ? this.parseLocalDate(date) : new Date(date);
     const deadline = new Date(checkDate);
     deadline.setHours(SCHOOL_CONFIG.dismissalHour, SCHOOL_CONFIG.dismissalMinute, 0, 0);
     return new Date() > deadline;
   },
 
-  attendanceStatusForDate(studentId, date) {
-    const d = new Date(date);
+  parseLocalDate(dateString) {
+    if (!dateString || typeof dateString !== 'string') return new Date(dateString);
+    const [year, month, day] = dateString.split('-').map(Number);
+    if ([year, month, day].some((n) => Number.isNaN(n))) return new Date(dateString);
+    return new Date(year, month - 1, day);
+  },
+
+  formatDateKey(date) {
+    const d = typeof date === 'string' ? this.parseLocalDate(date) : new Date(date);
     d.setHours(0, 0, 0, 0);
-    const dateKey = d.toISOString().split('T')[0];
-    const todayKey = new Date().toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  },
+
+  getTodayKey() {
+    return this.formatDateKey(new Date());
+  },
+
+  attendanceStatusForDate(studentId, date) {
+    const d = typeof date === 'string' ? this.parseLocalDate(date) : new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const dateKey = this.formatDateKey(d);
+    const todayKey = this.getTodayKey();
+    const historical = this.historicalAttendance || {};
     const monthly = this.monthlyAttendance || {};
+    if (historical[studentId] && typeof historical[studentId][dateKey] !== 'undefined') {
+      return historical[studentId][dateKey];
+    }
     if (monthly[studentId] && typeof monthly[studentId][dateKey] !== 'undefined') {
       return monthly[studentId][dateKey];
     }
     if (!this.isSchoolDayDate(d)) {
-      if (d < new Date(ACADEMIC_ATTENDANCE_START + 'T00:00:00')) return 'before_start';
-      if (d > new Date(todayKey + 'T00:00:00')) return 'future';
+      if (d < this.parseLocalDate(ACADEMIC_ATTENDANCE_START)) return 'before_start';
+      if (d > this.parseLocalDate(todayKey)) return 'future';
       return 'weekend';
     }
-    const todayAtt = this.attendance[studentId] || {};
-    if (dateKey === todayKey && todayAtt.status) {
-      return todayAtt.status;
-    }
-    if (d > new Date(todayKey + 'T00:00:00')) {
+    if (d > this.parseLocalDate(todayKey)) {
       return 'future';
     }
-    if (d.getTime() === new Date(todayKey + 'T00:00:00').getTime()) {
-      return this.isAttendanceDeadlinePassed(d) ? 'alpha' : 'no_record';
-    }
-    return 'alpha';
+    return 'no_record';
   },
 
   calculateStudentAttendanceSummary(studentId, year, month) {
@@ -674,9 +700,10 @@ const AppState = {
             return resolve({ success:false, message: `GPS Accuracy Too Low: ${Math.round(accuracy)}m. Tunggu hingga akurasi < 20m.` });
           }
 
-          const campuses = Array.isArray(MIPHA_APP_CONFIG.campuses) && MIPHA_APP_CONFIG.campuses.length > 0
-            ? MIPHA_APP_CONFIG.campuses
-            : (Array.isArray(window.MIPHA_CAMPUSES) ? window.MIPHA_CAMPUSES : [{ id: 'campus_1', name: 'Primary Campus', lat: SCHOOL_CONFIG.lat, lng: SCHOOL_CONFIG.lng, radiusMeters: SCHOOL_CONFIG.radiusMeters }]);
+          const campuses = Array.isArray(MIPHA_APP_CONFIG.campuses) ? MIPHA_APP_CONFIG.campuses : [];
+          if (campuses.length !== 2) {
+            return resolve({ success:false, message:'Konfigurasi lokasi sekolah tidak valid. Hubungi administrator.' });
+          }
 
           if (window.AttendanceEngine && typeof AttendanceEngine.findContainingCampus === 'function') {
             const found = AttendanceEngine.findContainingCampus(position.coords.latitude, position.coords.longitude, campuses);
@@ -693,13 +720,7 @@ const AppState = {
             }
           }
 
-          // Fallback behaviour: use legacy single-school check
-          const distance = this.calculateDistanceMeters(position.coords.latitude, position.coords.longitude, SCHOOL_CONFIG.lat, SCHOOL_CONFIG.lng);
-          if (distance > SCHOOL_CONFIG.radiusMeters) {
-            resolve({ success:false, message:`Outside School Radius: Anda berada ${distance}m dari sekolah. Check-in hanya diizinkan dalam jarak ${SCHOOL_CONFIG.radiusMeters}m.` });
-            return;
-          }
-          resolve(this.performCheckin('gps', distance, null, { id: SCHOOL_CONFIG.id || 'campus_1', name: SCHOOL_CONFIG.name || 'Sekolah Utama', lat: SCHOOL_CONFIG.lat, lng: SCHOOL_CONFIG.lng, radiusMeters: SCHOOL_CONFIG.radiusMeters, _gps: position.coords }));
+          resolve({ success:false, message:'Mesin validasi GPS tidak tersedia. Muat ulang aplikasi dan coba lagi.' });
         } catch (e) {
           console.warn('GPS check-in error:', e);
           resolve({ success:false, message: 'GPS check-in failed: ' + (e && e.message ? e.message : 'unknown') });
@@ -767,7 +788,7 @@ const AppState = {
     const now = new Date();
 
     if (method === 'pin' && pinInput !== SCHOOL_CONFIG.backupPin) {
-      return { success: false, message: 'PIN Backup Kelas Salah! (Gunakan: 7575)' };
+      return { success: false, message: 'PIN Backup Kelas Salah. Hubungi wali kelas.' };
     }
 
     const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
@@ -804,6 +825,10 @@ const AppState = {
     };
     this.logAudit(`Check-in Sekolah oleh ${this.currentUser.name} (${status.toUpperCase()}, ${distance}m)${campus && campus.name ? ' @ ' + campus.name : ''}`);
     this.saveState();
+    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+      const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
+    }
     return {
       success: true,
       status,
@@ -884,11 +909,26 @@ const AppState = {
 
   setupListeners() {
     document.addEventListener('click', (e) => {
-      const navBtn = e.target.closest('[data-view]');
+      let target = e.target;
+      if (target.nodeType !== Node.ELEMENT_NODE) target = target.parentElement;
+      if (!target) return;
+
+      const navBtn = target.closest('[data-view]');
       if (navBtn) {
         e.preventDefault();
         const view = navBtn.getAttribute('data-view');
         this.switchView(view);
+        return;
+      }
+
+      const cell = target.closest('td.editable-attendance-cell');
+      if (cell) {
+        e.preventDefault();
+        const studentId = cell.dataset.studentId;
+        const date = cell.dataset.date;
+        if (!studentId || !date) return;
+        this.toggleMonthlyAttendanceStatus(studentId, date);
+        this.render();
       }
     });
   },
@@ -913,6 +953,7 @@ const AppState = {
       }
       this.persistCurrentUser();
       this.activeView = 'dashboard';
+      this.firebaseListenersStarted = true;
       FirebaseBackend.startListeners(this);
       this.logAudit(`${this.currentUser.name} berhasil masuk melalui Firebase`);
       this.render();
@@ -933,6 +974,7 @@ const AppState = {
     if (this.currentUser) this.logAudit(`Pengguna ${this.currentUser.name} keluar`);
     try { if (window.FirebaseBackend) await FirebaseBackend.logout(); } catch (e) { console.warn(e); }
     this.currentUser = null;
+    this.firebaseListenersStarted = false;
     this.clearPersistedCurrentUser();
     sessionStorage.clear();
     this.render();
@@ -960,22 +1002,33 @@ const AppState = {
     this.recordMonthlyAttendanceForDate(todayDate, this.attendance);
     this.logAudit(`Manual edit attendance for ${this.students.find((s) => s.id === studentId).name}`);
     this.saveState();
+    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, this.attendance[studentId].status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
+    }
   },
 
   toggleMonthlyAttendanceStatus(studentId, date) {
     if (!this.currentUser || this.currentUser.role !== 'guru') return;
     if (!this.students.find((s) => s.id === studentId)) return;
-    const currentStatus = (this.monthlyAttendance[studentId] || {})[date] || 'alpha';
-    const cycle = ['alpha', 'tepat_waktu', 'terlambat', 'sakit', 'izin'];
-    const index = cycle.indexOf(currentStatus);
-    const nextStatus = cycle[(index + 1) % cycle.length];
-    this.setMonthlyAttendanceStatus(studentId, date, nextStatus);
+    const currentStatus = this.attendanceStatusForDate(studentId, date);
+    const cycle = ['no_record', 'alpha', 'tepat_waktu', 'terlambat', 'sakit', 'izin'];
+    const currentIndex = cycle.indexOf(currentStatus);
+    const normalizedIndex = currentIndex === -1 ? 0 : currentIndex;
+    const nextStatus = cycle[(normalizedIndex + 1) % cycle.length];
+    this.setAttendanceStatusForDate(studentId, date, nextStatus);
     this.saveState();
+    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+      FirebaseBackend.writeAttendanceRecord(studentId, this.formatDateKey(date), nextStatus, this.students.find((s) => s.id === studentId)).catch(error => console.warn('Cloud sync failed:', error));
+    }
   },
 
-  setMonthlyAttendanceStatus(studentId, date, status) {
+  setAttendanceStatusForDate(studentId, date, status) {
+    const dateKey = this.formatDateKey(date);
+    if (!this.historicalAttendance[studentId]) this.historicalAttendance[studentId] = {};
+    this.historicalAttendance[studentId][dateKey] = status;
     if (!this.monthlyAttendance[studentId]) this.monthlyAttendance[studentId] = {};
-    this.monthlyAttendance[studentId][date] = status;
+    this.monthlyAttendance[studentId][dateKey] = status;
+    localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
     localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
   },
 
@@ -1402,6 +1455,37 @@ const AppState = {
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header-flex">
+          <div class="card-title">📝 Tugas Terbaru</div>
+          <button class="btn btn-secondary" data-view="assignments">Lihat Semua</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.75rem;">
+          ${this.assignments.length ? this.assignments.slice(0, 3).map((assignment) => {
+            const submittedBy = Array.isArray(assignment.submittedBy) ? assignment.submittedBy : [];
+            const alreadySubmitted = submittedBy.includes(student.id);
+            const submittedCount = submittedBy.length || Number(assignment.submitted || 0);
+            const pct = assignment.total ? Math.round((submittedCount / assignment.total) * 100) : 0;
+            return `
+              <div style="border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 0.8rem; background: var(--bg-main);">
+                <div style="display:flex; justify-content:space-between; gap:0.5rem; align-items:start; flex-wrap:wrap;">
+                  <div>
+                    <div style="font-weight: 800; color: var(--primary-dark);">${assignment.title}</div>
+                    <div style="font-size: 0.77rem; color: var(--text-muted); margin-top: 2px;">${assignment.subject || '-'} • Deadline ${assignment.dueDate || '-'}</div>
+                  </div>
+                  <span class="badge ${alreadySubmitted ? 'badge-success' : 'badge-warning'}">${alreadySubmitted ? '✅ Terkumpul' : '⏳ Belum'}</span>
+                </div>
+                <div style="font-size: 0.82rem; color: var(--text-main); margin-top: 0.45rem;">${assignment.description || 'Tidak ada deskripsi.'}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 0.6rem; gap: 0.5rem; flex-wrap:wrap;">
+                  <div style="font-size: 0.74rem; color: var(--text-muted);">${submittedCount}/${assignment.total || 0} terkumpul • ${pct}%</div>
+                  ${alreadySubmitted ? '<span class="badge badge-success">Sudah dikumpulkan</span>' : `<button class="btn btn-primary btn-submit-assignment" data-assignment-id="${assignment.id}" style="padding: 0.35rem 0.7rem; font-size: 0.78rem;">📤 Kumpulkan</button>`}
+                </div>
+              </div>
+            `;
+          }).join('') : '<div style="font-size: 0.82rem; color: var(--text-muted);">Belum ada tugas yang dibagikan untuk kelas ini.</div>'}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.5rem;">
         <div class="card-title">📢 Pengumuman Wali Kelas Terbaru</div>
         ${this.announcements.map(a => `
           <div style="border-bottom: 1px solid var(--border-light); padding: 0.75rem 0;">
@@ -1470,6 +1554,33 @@ const AppState = {
         </div>
         `;
       })()}
+
+      <div class="card" style="margin-bottom: 1rem; border-left: 4px solid var(--accent-yellow-bright);">
+        <div class="card-header-flex">
+          <div class="card-title">📝 Tugas Aktif Kelas</div>
+          <button class="btn btn-primary btn-add-assignment">+ Tambah Tugas</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.7rem;">
+          ${this.assignments.length ? this.assignments.slice(0, 3).map((assignment) => {
+            const submittedBy = Array.isArray(assignment.submittedBy) ? assignment.submittedBy : [];
+            const submittedCount = submittedBy.length || Number(assignment.submitted || 0);
+            const pct = assignment.total ? Math.round((submittedCount / assignment.total) * 100) : 0;
+            return `
+              <div style="border:1px solid var(--border-light); border-radius: var(--radius-sm); padding:0.8rem; background: var(--bg-main);">
+                <div style="display:flex; justify-content:space-between; gap:0.5rem; align-items:start; flex-wrap:wrap;">
+                  <div>
+                    <div style="font-weight:800; color: var(--primary-dark);">${assignment.title}</div>
+                    <div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">${assignment.subject || '-'} • Deadline ${assignment.dueDate || '-'}</div>
+                  </div>
+                  <span class="badge badge-info">${submittedCount}/${assignment.total || 0}</span>
+                </div>
+                <div style="font-size:0.79rem; color:var(--text-main); margin-top:0.45rem;">${assignment.description || 'Tidak ada deskripsi.'}</div>
+                <div style="font-size:0.74rem; color:var(--text-muted); margin-top:0.4rem;">${pct}% terkumpul</div>
+              </div>
+            `;
+          }).join('') : '<div style="font-size:0.82rem; color:var(--text-muted);">Belum ada tugas yang dibagikan.</div>'}
+        </div>
+      </div>
 
       <div class="mipha-grid">
         <button class="mipha-module urgent" data-view="home_visits"><span>🏡</span><b>Home Visit Center</b><small>${this.homeVisits.filter(v=>v.status!=='completed').length} visits need action</small></button>
@@ -1640,8 +1751,8 @@ const AppState = {
     // month is 0-indexed (0=Jan)
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const SCHOOL_DAYS = [1, 2, 3, 4, 5]; // Mon–Fri
-    const academicStart = new Date(ACADEMIC_ATTENDANCE_START + 'T00:00:00');
-    const todayBoundary = new Date(); todayBoundary.setHours(0,0,0,0);
+    const academicStart = this.parseLocalDate(ACADEMIC_ATTENDANCE_START);
+    const todayBoundary = this.parseLocalDate(this.getTodayKey());
 
     const matrix = this.students.map(student => {
       let countS = 0, countI = 0, countA = 0, countH = 0, countLate = 0, schoolDaysTotal = 0;
@@ -1649,8 +1760,8 @@ const AppState = {
 
       for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, month, d);
+        date.setHours(0, 0, 0, 0);
         const dow = date.getDay(); // 0=Sun, 6=Sat
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const isSchoolDay = SCHOOL_DAYS.includes(dow) && date >= academicStart && date <= todayBoundary;
         const status = this.attendanceStatusForDate(student.id, date);
 
@@ -1787,12 +1898,12 @@ const AppState = {
 
       <!-- Matrix Grid -->
       <div style="overflow-x: visible; border:2px solid var(--border-light); border-radius:var(--radius-md); background:#fff; box-shadow:var(--shadow-md); width: 100%;">
-        <table style="border-collapse:collapse; font-family:var(--font-family); width:100%; min-width:100%;">
+        <table id="attendance-matrix-table" style="border-collapse:collapse; font-family:var(--font-family); width:100%; min-width:100%;">
 
           <!-- Title Row -->
           <thead>
             <tr>
-              <td colspan="${daysInMonth + 6}"
+              <td colspan="${daysInMonth + 7}"
                 style="background:var(--primary-soft); text-align:center; padding:0.6rem 1rem; border-bottom:2px solid var(--border-light);">
                 <div style="font-weight:800;color:var(--primary-dark);font-size:0.95rem;">Absensi Kelas X DKV F</div>
                 <div style="font-size:0.78rem;color:var(--text-muted);">SMK Bhumi Phala Parakan — Tahun Ajaran 2026/2027</div>
@@ -1802,7 +1913,7 @@ const AppState = {
             <!-- Wali Kelas Row -->
             <tr>
               <td colspan="3" style="padding:0.4rem 0.75rem;font-size:0.8rem;color:var(--text-muted);border-bottom:1px solid var(--border-light);">Wali Kelas:</td>
-              <td colspan="${daysInMonth + 3}" style="padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:800;color:var(--primary-dark);border-bottom:1px solid var(--border-light);">Gevin Dimas Eka Kusuma, A.Md.</td>
+              <td colspan="${daysInMonth + 4}" style="padding:0.4rem 0.75rem;font-size:0.82rem;font-weight:800;color:var(--primary-dark);border-bottom:1px solid var(--border-light);">Gevin Dimas Eka Kusuma, A.Md.</td>
             </tr>
 
             <!-- Month Header -->
@@ -1841,7 +1952,8 @@ const AppState = {
                   <td style="background:${rowBg};text-align:center;font-size:0.72rem;color:var(--primary-dark);padding:0.2rem 0.3rem;border:1px solid #f0e6ff;white-space:nowrap;">${row.student.nis}</td>
                   <td style="background:${rowBg};font-size:0.78rem;font-weight:700;color:var(--primary-dark);padding:0.2rem 0.6rem;border:1px solid #f0e6ff;white-space:nowrap;">${row.student.name}</td>
                   ${row.days.map(cell => {
-                    const editableAttrs = cell.isSchoolDay && isEditableMatrix ? `class="editable-attendance-cell" data-student-id="${row.student.id}" data-date="${selYear}-${String(selMonth + 1).padStart(2, '0')}-${String(cell.d).padStart(2, '0')}"` : '';
+                    const cellDate = this.formatDateKey(new Date(selYear, selMonth, cell.d));
+                    const editableAttrs = cell.isSchoolDay && isEditableMatrix ? `class="editable-attendance-cell" data-student-id="${row.student.id}" data-date="${cellDate}"` : '';
                     const cursorStyle = cell.isSchoolDay && isEditableMatrix ? 'cursor:pointer;' : '';
                     const titleText = cell.isSchoolDay ? (isEditableMatrix ? 'Klik untuk mengubah status absensi' : cell.status) : 'Libur';
                     return `
@@ -2374,9 +2486,109 @@ const AppState = {
     w.document.write(`<!doctype html><html><head><title>Home Visit Report</title><style>body{font-family:Arial,sans-serif;color:#222;margin:24px}.header{text-align:center;border-bottom:3px solid #581c87;margin-bottom:20px}.report{page-break-after:always;margin-bottom:35px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #777;padding:8px;text-align:left}th{background:#f3e8ff}.photos{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.photos img{width:220px;height:150px;object-fit:cover;border:1px solid #999}.sign{display:flex;justify-content:space-between;text-align:center;margin-top:45px}.no-print{margin-bottom:18px}@media print{.no-print{display:none}}</style></head><body><button class="no-print" onclick="print()">Print / Save PDF</button><div class="header"><h1>MIPHA COMPANION</h1><p>Home Visit Documentation — X DKV F</p></div>${rows||'<p>No visits recorded.</p>'}</body></html>`); w.document.close();
   },
 
+  addAssignmentFromPrompt() {
+    if (!this.currentUser || this.currentUser.role !== 'guru') return;
+    const input = document.getElementById('assignment-title');
+    if (input) {
+      input.focus();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  },
+
+  readFileAsDataURL(file) {
+    if (!file) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result || null);
+      reader.onerror = () => reject(new Error('Tidak bisa membaca lampiran tugas.'));
+      reader.readAsDataURL(file);
+    });
+  },
+
+  async submitAssignment(assignmentId, note = '', file = null) {
+    if (!this.currentUser) return;
+    const assignment = this.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) return;
+    const studentId = this.currentUser.id;
+    const submissions = Array.isArray(assignment.submissions) ? assignment.submissions : [];
+    const existingIndex = submissions.findIndex((item) => item.studentId === studentId);
+    const attachmentName = file ? file.name : null;
+    const attachmentData = file ? await this.readFileAsDataURL(file) : null;
+    const submission = {
+      studentId,
+      studentName: this.currentUser.name,
+      submittedAt: new Date().toISOString(),
+      note: String(note || '').trim(),
+      attachmentName,
+      attachmentData
+    };
+    if (existingIndex >= 0) {
+      submissions[existingIndex] = submission;
+    } else {
+      submissions.push(submission);
+    }
+    assignment.submissions = submissions;
+    assignment.submittedBy = submissions.map((item) => item.studentId);
+    assignment.submitted = submissions.length;
+    this.logAudit(`Mengumpulkan tugas: ${assignment.title}`);
+    this.activeAssignmentSubmissionId = null;
+    this.saveState();
+    this.render();
+  },
+
   renderAssignmentsView() {
-    return `<div class="section-heading"><div><h2>📚 Assignment Center</h2><p>Create and monitor simple classroom assignments.</p></div><button class="btn btn-primary" id="btn-new-assignment">+ New Assignment</button></div>
-      <div class="assignment-list">${this.assignments.map(a=>{const pct=Math.round(a.submitted/a.total*100);return `<article class="card assignment-card"><div><span class="badge badge-info">${a.subject}</span><h3>${a.title}</h3><p>${a.description}</p><small>Due ${a.dueDate}</small></div><div class="assignment-progress"><b>${a.submitted}/${a.total}</b><span>submitted</span><div class="progress"><i style="width:${pct}%"></i></div><strong>${a.total-a.submitted} missing</strong><button class="btn btn-secondary btn-share-assignment" data-id="${a.id}" style="margin-top:.6rem">📱 Share to WhatsApp</button></div></article>`}).join('')}</div>`;
+    const isGuru = this.currentUser?.role === 'guru';
+    const studentId = this.currentUser?.id;
+    return `<div class="section-heading"><div><h2>📚 Assignment Center</h2><p>Buat tugas, lampirkan instruksi, dan kelola pengumpulan tugas siswa.</p></div>${isGuru ? '<button class="btn btn-primary" id="btn-new-assignment">+ New Assignment</button>' : ''}</div>
+      ${isGuru ? `<form id="assignment-form" class="card" style="margin-bottom:1rem;padding:1rem;display:grid;gap:0.75rem;">
+        <div class="card-title">➕ Tambah Tugas Baru</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;">
+          <div><label class="form-label">Judul Tugas</label><input class="form-input" id="assignment-title" required></div>
+          <div><label class="form-label">Mata Pelajaran</label><input class="form-input" id="assignment-subject" value="${this.teacherProfile.subject || 'Dasar Animasi'}"></div>
+          <div><label class="form-label">Deadline</label><input class="form-input" id="assignment-due-date" type="date"></div>
+        </div>
+        <div><label class="form-label">Deskripsi Tugas</label><textarea class="form-textarea" id="assignment-description" rows="3" placeholder="Jelaskan instruksi, target, dan kriteria penilaian..."></textarea></div>
+        <div><label class="form-label">Lampiran (opsional)</label><input class="form-input" id="assignment-attachment" type="file" accept="image/*,.pdf,.doc,.docx,.txt"></div>
+        <button class="btn btn-primary" type="submit" style="width:max-content;">💾 Simpan Tugas</button>
+      </form>` : ''}
+      <div class="assignment-list">${this.assignments.map((assignment) => {
+        const submissions = Array.isArray(assignment.submissions) ? assignment.submissions : [];
+        const submittedCount = submissions.length || Number(assignment.submitted || 0);
+        const pct = assignment.total ? Math.round((submittedCount / assignment.total) * 100) : 0;
+        const mySubmission = studentId ? submissions.find((item) => item.studentId === studentId) : null;
+        const hasAttachment = Boolean(assignment.attachmentName || assignment.attachmentData);
+        return `<article class="card assignment-card">
+          <div style="display:flex;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+            <div>
+              <span class="badge badge-info">${assignment.subject || 'Tugas'}</span>
+              <h3 style="margin:0.4rem 0 0.25rem;">${assignment.title}</h3>
+              ${assignment.description ? `<p style="margin:0 0 0.4rem;color:var(--text-main);">${assignment.description}</p>` : ''}
+              <small>Deadline: ${assignment.dueDate || '-'}</small>
+              ${hasAttachment ? `<div style="margin-top:0.4rem;font-size:0.8rem;">📎 Lampiran: <a href="${assignment.attachmentData || '#'}" target="_blank" rel="noopener" style="color:var(--accent-magenta);font-weight:700;">${assignment.attachmentName || 'Buka lampiran'}</a></div>` : ''}
+            </div>
+            <div class="assignment-progress" style="min-width:140px;">
+              <b>${submittedCount}/${assignment.total || 0}</b>
+              <span>${isGuru ? 'terkumpul' : 'status'}</span>
+              <div class="progress"><i style="width:${pct}%"></i></div>
+              <strong>${Math.max((assignment.total || 0) - submittedCount, 0)} ${isGuru ? 'belum' : 'tersisa'}</strong>
+              ${!isGuru ? `<div style="margin-top:0.45rem;">${mySubmission ? '<span class="badge badge-success">✅ Terkumpul</span>' : '<span class="badge badge-warning">⏳ Belum dikumpulkan</span>'}</div>` : ''}
+            </div>
+          </div>
+          ${!isGuru ? (this.activeAssignmentSubmissionId === assignment.id ? `<form class="assignment-submit-form" data-assignment-id="${assignment.id}" style="margin-top:0.8rem;display:grid;gap:0.6rem;">
+            <textarea class="form-textarea" id="assignment-note-${assignment.id}" rows="3" placeholder="Catatan tugas (opsional)"></textarea>
+            <input class="form-input" id="assignment-file-${assignment.id}" type="file" accept="image/*,.pdf,.doc,.docx,.txt">
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+              <button class="btn btn-primary" type="submit">📤 Kirim Tugas</button>
+              <button class="btn btn-secondary" type="button" data-cancel-submission="${assignment.id}">Batal</button>
+            </div>
+          </form>` : `<button class="btn btn-primary btn-open-submit-assignment" data-assignment-id="${assignment.id}" style="margin-top:0.7rem;">📤 ${mySubmission ? 'Perbarui' : 'Kumpulkan'} Tugas</button>`) : ''}
+          ${isGuru ? `<button class="btn btn-secondary btn-share-assignment" data-id="${assignment.id}" style="margin-top:.6rem">📱 Share to WhatsApp</button>` : ''}
+          ${isGuru && submissions.length ? `<div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-muted);">
+            <div style="font-weight:700;color:var(--primary-dark);margin-bottom:0.35rem;">Pengumpulan (${submissions.length})</div>
+            ${submissions.slice(0, 4).map((item) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;margin-top:0.25rem;">${item.studentName || 'Siswa'}${item.attachmentName ? ` <span style="color:var(--accent-magenta);">• ${item.attachmentName}</span>` : ''}${item.attachmentData ? `<button class="btn btn-secondary btn-preview-attachment" data-attachment="${item.attachmentData}" data-name="${item.attachmentName || 'lampiran'}" style="padding:0.2rem 0.45rem;font-size:0.7rem;">Preview</button>` : ''}</div>`).join('')}
+          </div>` : ''}
+        </article>`;
+      }).join('')}</div>`;
   },
 
   renderAIAssistantView() {
@@ -2397,6 +2609,19 @@ const AppState = {
     const captureHome=document.getElementById('btn-capture-home-location');
     if(captureHome) captureHome.onclick=()=>{ if(!navigator.geolocation)return alert('Location is not supported.'); captureHome.disabled=true; captureHome.textContent='Getting location...'; navigator.geolocation.getCurrentPosition(pos=>{const st=this.students.find(x=>x.id===this.currentUser.id); st.homeLat=pos.coords.latitude;st.homeLng=pos.coords.longitude;Object.assign(this.currentUser,st);this.saveState();alert('✅ Home location saved.');this.render();},err=>{captureHome.disabled=false;captureHome.textContent='Use Current Location';alert('Could not save location: '+err.message);},{enableHighAccuracy:true,timeout:10000});};
     document.querySelectorAll('.btn-share-assignment').forEach(btn=>btn.onclick=()=>{const a=this.assignments.find(x=>x.id===btn.dataset.id);if(!a)return;const text=`📚 X DKV F - ${a.subject}%0A${a.title}%0ADeadline: ${a.dueDate}%0A${a.description}%0A%0AOpen MIPHA COMPANION for details.`;window.open('https://wa.me/?text='+encodeURIComponent(decodeURIComponent(text)),'_blank');});
+    document.querySelectorAll('.btn-submit-assignment').forEach(btn=>btn.onclick=()=>this.submitAssignment(btn.dataset.assignmentId));
+    document.querySelectorAll('.btn-open-submit-assignment').forEach(btn=>btn.onclick=()=>{this.activeAssignmentSubmissionId = btn.dataset.assignmentId; this.render();});
+    document.querySelectorAll('[data-cancel-submission]').forEach(btn=>btn.onclick=()=>{this.activeAssignmentSubmissionId = null; this.render();});
+    document.querySelectorAll('.btn-preview-attachment').forEach(btn=>btn.onclick=()=>{
+      const name = btn.dataset.name || 'lampiran';
+      const data = btn.dataset.attachment;
+      if (!data) return;
+      const win = window.open('', '_blank');
+      if (!win) return alert('Izinkan popup untuk melihat lampiran tugas.');
+      win.document.write(`<html><body style="font-family:sans-serif;padding:20px;"><h3>${name}</h3><p>Preview lampiran tugas</p><img src="${data}" alt="${name}" style="max-width:100%;border-radius:8px;" /></body></html>`);
+      win.document.close();
+    });
+    document.querySelectorAll('.btn-add-assignment').forEach(btn=>btn.onclick=()=>this.addAssignmentFromPrompt());
     document.querySelectorAll('.btn-complete-visit').forEach(b=>b.onclick=()=>{const v=this.homeVisits.find(x=>x.id===b.dataset.id); if(!v)return; if(!(v.photos||[]).length){alert('⚠️ Upload at least one proof photo before marking this visit complete.'); this.visitEditorOpen=true; this.editingVisitId=v.id; this.render(); return;} v.status='completed';v.followUp=false;this.saveState();this.render();});
     document.querySelectorAll('.btn-print-visit').forEach(b=>b.onclick=()=>this.printVisitReport(b.dataset.id));
     const printAll=document.getElementById('btn-print-all-visits'); if(printAll)printAll.onclick=()=>this.printVisitReport();
@@ -2404,7 +2629,32 @@ const AppState = {
     const cancelVisit=document.getElementById('btn-cancel-visit'); if(cancelVisit)cancelVisit.onclick=()=>{this.visitEditorOpen=false;this.render();};
     const studentPicker=document.getElementById('hv-student'); if(studentPicker)studentPicker.onchange=()=>{const st=this.students.find(x=>x.id===studentPicker.value);const p=document.getElementById('hv-family-preview');if(st&&p)p.innerHTML=`<b>${st.name}</b><br>📍 ${st.address||'Home address not completed'}<br>📱 ${st.parentPhone||'Parent WhatsApp not completed'}<br>${st.homeLat!=null?'✅ Home GPS saved':'⚠️ Home GPS not saved yet'}`;};
     const photoInput=document.getElementById('hv-photos'); if(photoInput)photoInput.onchange=()=>{const preview=document.getElementById('hv-photo-preview');if(!preview)return;preview.innerHTML='';[...photoInput.files].slice(0,4).forEach(file=>{const r=new FileReader();r.onload=()=>{const img=document.createElement('img');img.src=r.result;img.alt='Photo preview';preview.appendChild(img)};r.readAsDataURL(file);});}; const visitForm=document.getElementById('home-visit-form'); if(visitForm)visitForm.onsubmit=async e=>{e.preventDefault();const st=this.students.find(x=>x.id===document.getElementById('hv-student').value);if(!st)return alert('Choose a student.');const files=[...document.getElementById('hv-photos').files];const desiredStatus=document.getElementById('hv-status').value;if(desiredStatus==='completed'&&!files.length)return alert('⚠️ A proof photo is required before saving a completed visit.');if(files.length&&!document.getElementById('hv-permission').checked)return alert('Confirm parent/guardian photo permission first.');const photos=await Promise.all(files.slice(0,4).map(f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f);})));this.homeVisits.unshift({id:'hv_'+Date.now(),studentId:st.id,status:document.getElementById('hv-status').value,scheduledDate:document.getElementById('hv-date').value,address:st.address||'Address not completed',parentPhone:st.parentPhone||'',reason:document.getElementById('hv-reason').value,notes:document.getElementById('hv-notes').value.trim(),followUpAction:document.getElementById('hv-followup').value.trim(),followUp:Boolean(document.getElementById('hv-followup').value.trim()),photos,photoPermission:document.getElementById('hv-permission').checked,createdAt:new Date().toISOString()});this.visitEditorOpen=false;this.saveState();alert('✅ Home visit saved.');this.render();};
-    const newAssignment=document.getElementById('btn-new-assignment'); if(newAssignment)newAssignment.onclick=()=>{const title=prompt('Assignment title:'); if(!title)return; const due=prompt('Due date (YYYY-MM-DD):','2026-08-10'); this.assignments.unshift({id:'as_'+Date.now(),title,subject:'Class Assignment',dueDate:due||'',description:'New assignment created by teacher.',submitted:0,total:this.students.length});this.saveState();this.render();};
+    const newAssignment=document.getElementById('btn-new-assignment'); if(newAssignment)newAssignment.onclick=()=>this.addAssignmentFromPrompt();
+    const assignmentForm=document.getElementById('assignment-form');
+    if(assignmentForm) assignmentForm.onsubmit=async (e)=>{
+      e.preventDefault();
+      const title=document.getElementById('assignment-title').value.trim();
+      const subject=document.getElementById('assignment-subject').value.trim();
+      const dueDate=document.getElementById('assignment-due-date').value;
+      const description=document.getElementById('assignment-description').value.trim();
+      const attachmentFile=document.getElementById('assignment-attachment').files[0];
+      if(!title){ alert('Judul tugas wajib diisi.'); return; }
+      const attachmentData = attachmentFile ? await this.readFileAsDataURL(attachmentFile) : null;
+      const assignment={id:`as_${Date.now()}`,title,subject:subject||'Dasar Animasi',dueDate,description,submitted:0,total:this.students.length||0,submittedBy:[],submissions:[],attachmentName:attachmentFile?attachmentFile.name:null,attachmentData};
+      this.assignments.unshift(assignment);
+      this.logAudit(`Membuat tugas: ${assignment.title}`);
+      this.saveState();
+      this.render();
+    };
+    document.querySelectorAll('.assignment-submit-form').forEach((form)=>{
+      form.onsubmit=async (e)=>{
+        e.preventDefault();
+        const assignmentId=form.dataset.assignmentId;
+        const note=document.getElementById(`assignment-note-${assignmentId}`)?.value || '';
+        const file=document.getElementById(`assignment-file-${assignmentId}`)?.files?.[0] || null;
+        await this.submitAssignment(assignmentId, note, file);
+      };
+    });
     let aiMode=0; document.querySelectorAll('.ai-tool').forEach(b=>b.onclick=()=>{document.querySelectorAll('.ai-tool').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');aiMode=Number(b.dataset.ai);});
     const gen=document.getElementById('btn-generate-ai'); if(gen)gen.onclick=()=>{const notes=document.getElementById('ai-input').value.trim()||'No additional notes provided.'; const titles=['Weekly Class Summary','Home Visit Report','Parent Meeting Brief','Student Report Comment','School Announcement']; const templates=[`Weekly overview: Attendance and assignment records have been reviewed. Key teacher notes: ${notes} Recommended action: follow up with students showing repeated absence or missing work.`,`Home visit report: The visit was conducted to understand the student’s family and learning conditions. Observation notes: ${notes} Follow-up should be agreed with the family and documented by the homeroom teacher.`,`Parent meeting brief: Strengths and progress should be discussed first, followed by concerns supported by records. Teacher notes: ${notes} Agree on one clear follow-up action and review date.`,`Student comment draft: The student continues to develop academically and socially. Based on teacher observations: ${notes} Continued encouragement and consistent follow-up are recommended.`,`Announcement draft: Dear students and parents, ${notes} Please read the information carefully and contact the homeroom teacher if clarification is needed.`]; document.getElementById('ai-output').innerHTML=`<b>${titles[aiMode]}</b><p>${templates[aiMode]}</p><small>Prototype draft — review before use.</small>`;};
 
@@ -2586,17 +2836,6 @@ const AppState = {
       };
     }
 
-    document.querySelectorAll('.editable-attendance-cell').forEach((cell) => {
-      cell.onclick = (e) => {
-        e.preventDefault();
-        const studentId = cell.getAttribute('data-student-id');
-        const date = cell.getAttribute('data-date');
-        if (!studentId || !date) return;
-        this.toggleMonthlyAttendanceStatus(studentId, date);
-        this.render();
-      };
-    });
-
     const btnSaveModalNotes = document.getElementById('btn-save-modal-notes');
     if (btnSaveModalNotes) {
       btnSaveModalNotes.onclick = () => {
@@ -2705,7 +2944,7 @@ const AppState = {
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const netlifylink = document.createElement('a');
     link.href = url;
     link.download = `Rekap_Presensi_X_DKV_F_${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);

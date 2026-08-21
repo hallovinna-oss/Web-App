@@ -20,6 +20,22 @@ const FirebaseBackend = {
   auth,
   db,
   unsubscribers: [],
+  renderQueued: false,
+
+  requestRender(appState) {
+    if (this.renderQueued) return;
+    this.renderQueued = true;
+    queueMicrotask(() => {
+      this.renderQueued = false;
+      appState.render();
+    });
+  },
+
+  normalizeAttendanceStatus(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    const allowed = ['tepat_waktu', 'terlambat', 'sakit', 'izin', 'alpha'];
+    return allowed.includes(normalized) ? normalized : null;
+  },
 
   emailFor(username, role) {
     const clean = String(username || '').trim().toLowerCase();
@@ -62,9 +78,11 @@ const FirebaseBackend = {
     try {
       credential = await auth.signInWithEmailAndPassword(email, firebasePassword);
     } catch (error) {
-      const canBootstrap = role === 'guru'
-        ? username === 'admin' && password === 'admin123'
-        : localStudents.some(s => String(s.nis) === String(username)) && String(password) === String(username);
+      // Teacher accounts must be provisioned beforehand. Never allow a public
+      // client to bootstrap a privileged account from default credentials.
+      const canBootstrap = role !== 'guru'
+        && localStudents.some(s => String(s.nis) === String(username))
+        && String(password) === String(username);
       if (!canBootstrap || !['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password'].includes(error.code)) throw error;
       credential = await auth.createUserWithEmailAndPassword(email, firebasePassword);
     }
@@ -127,9 +145,12 @@ const FirebaseBackend = {
 
     Object.values(state.attendance || {}).forEach(record => {
       if (!record || !record.studentId) return;
+      const validStatus = this.normalizeAttendanceStatus(record.status);
+      if (!validStatus) return;
       const clean = this.sanitizeFirestoreValue({ ...record });
       const attendanceDoc = {
         ...clean,
+        status: validStatus,
         campusId: clean.campusId || null,
         campusName: clean.campusName || null,
         date: today,
@@ -165,26 +186,73 @@ const FirebaseBackend = {
     await Promise.allSettled(writes);
   },
 
+  async writeAttendanceRecord(studentId, dateKey, status, student) {
+    if (!auth.currentUser) return;
+    const validStatus = this.normalizeAttendanceStatus(status);
+    if (!validStatus) throw new Error('Attendance status is missing or invalid.');
+    const attendanceDoc = this.sanitizeFirestoreValue({
+      studentId,
+      date: dateKey,
+      status: validStatus,
+      studentNis: student?.nis || null,
+      studentName: student?.name || null,
+      campusId: student?.campusId || null,
+      campusName: student?.campusName || null,
+      latitude: typeof student?.latitude === 'number' ? student.latitude : null,
+      longitude: typeof student?.longitude === 'number' ? student.longitude : null,
+      gpsAccuracy: typeof student?.gpsAccuracy === 'number' ? student.gpsAccuracy : null,
+      gpsTimestamp: student?.gpsTimestamp || null,
+      checkinTime: student?.checkinTime || null,
+      checkinMethod: student?.checkinMethod || null,
+      distanceMeters: student?.distanceMeters || null,
+      checkoutTime: student?.checkoutTime || null,
+      homeConfirmed: typeof student?.homeConfirmed === 'boolean' ? student.homeConfirmed : null,
+      homeArrivalTime: student?.homeArrivalTime || null,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return db.collection('attendance').doc(`${dateKey}_${studentId}`).set(attendanceDoc, { merge: true });
+  },
+
   startListeners(appState) {
     this.stopListeners();
     const today = appState.attendanceDate || new Date().toISOString().slice(0, 10);
+    const startDate = ACADEMIC_ATTENDANCE_START;
+    const endDate = new Date().toISOString().slice(0, 10);
 
-    this.unsubscribers.push(db.collection('attendance').where('date', '==', today).onSnapshot(snapshot => {
-      snapshot.docChanges().forEach(change => {
-        const data = change.doc.data();
-        if (data.studentId) appState.attendance[data.studentId] = data;
-      });
-      appState.render();
-    }, console.error));
+    this.unsubscribers.push(db.collection('attendance')
+      .where('date', '>=', startDate)
+      .where('date', '<=', endDate)
+      .onSnapshot(snapshot => {
+        const historical = {};
+        const dayAttendance = {};
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (!data.studentId || !data.date) return;
+          if (!historical[data.studentId]) historical[data.studentId] = {};
+          const validStatus = this.normalizeAttendanceStatus(data.status);
+          if (!validStatus) return;
+          historical[data.studentId][data.date] = validStatus;
+          if (data.date === today) {
+            dayAttendance[data.studentId] = data;
+          }
+        });
+        appState.historicalAttendance = historical;
+        // Firestore is authoritative while authenticated. Do not preserve stale
+        // local records that are absent from the cloud snapshot.
+        appState.attendance = dayAttendance;
+        localStorage.setItem('dkvf_attendance', JSON.stringify(dayAttendance));
+        localStorage.setItem('dkvf_historical_attendance', JSON.stringify(historical));
+        this.requestRender(appState);
+      }, console.error));
 
     this.unsubscribers.push(db.collection('leaveRequests').orderBy('submittedAt', 'desc').onSnapshot(snapshot => {
       appState.leaveRequests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      appState.render();
+      this.requestRender(appState);
     }, error => {
       console.warn('Leave listener fallback:', error.message);
       this.unsubscribers.push(db.collection('leaveRequests').onSnapshot(snapshot => {
         appState.leaveRequests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        appState.render();
+        this.requestRender(appState);
       }));
     }));
 
@@ -196,7 +264,7 @@ const FirebaseBackend = {
         const refreshed = appState.students.find(s => s.id === appState.currentUser.id);
         if (refreshed) appState.currentUser = { ...appState.currentUser, ...refreshed };
       }
-      appState.render();
+      this.requestRender(appState);
     }, console.error));
   }
 };
