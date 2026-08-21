@@ -14,8 +14,8 @@
   <link rel="icon" type="image/png" href="./logo.png">
   
   <!-- System Font Fallback & Stylesheet -->
-  <link rel="stylesheet" href="./styles.css?v=rc4">
-  <link rel="stylesheet" href="./theme-light.css?v=rc4">
+  <link rel="stylesheet" href="./styles.css?v=rc5">
+  <link rel="stylesheet" href="./theme-light.css?v=rc5">
   <link rel="stylesheet" href="./styles-mobile.css" media="(max-width:720px)">
 </head>
 <body>
@@ -27,7 +27,7 @@
       <div class="splash-divider"></div>
       <h1>MIPHA COMPANION</h1>
       <p>Observe · Understand · Support</p>
-      <span>MIPHA Companion v1.0 RC4 · Production Edition</span>
+      <span>MIPHA Companion v1.0 RC5 · Production Edition</span>
     </div>
   </div>
   <div id="app-container">
@@ -52,14 +52,14 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <!-- RC4 uses one browser runtime. The duplicate /src module prototype is kept
        as reference only and must not run alongside these compatibility scripts. -->
-  <script src="./firebase-init.js?v=rc4"></script>
-  <script src="./config.js?v=rc4"></script>
-  <script src="./lib/geo-utils.js?v=rc4"></script>
-  <script src="./attendance-engine.js?v=rc4"></script>
+  <script src="./firebase-init.js?v=rc5"></script>
+  <script src="./config.js?v=rc5"></script>
+  <script src="./lib/geo-utils.js?v=rc5"></script>
+  <script src="./attendance-engine.js?v=rc5"></script>
   <!-- XLSX library is loaded on-demand to reduce initial mobile payload -->
 
   <!-- Application Engine -->
-  <script src="./app.js?v=rc4"></script>
+  <script src="./app.js?v=rc5"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(console.error));

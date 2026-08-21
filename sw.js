@@ -1,14 +1,14 @@
-const CACHE_NAME = 'mipha-companion-rc4-network-first-v3';
+const CACHE_NAME = 'mipha-companion-rc5-network-first-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './styles.css?v=rc4',
-  './theme-light.css?v=rc4',
-  './app.js?v=rc4',
+  './styles.css?v=rc5',
+  './theme-light.css?v=rc5',
+  './app.js?v=rc5',
   './styles-mobile.css',
-  './firebase-init.js?v=rc4',
-  './attendance-engine.js?v=rc4',
-  './config.js?v=rc4',
+  './firebase-init.js?v=rc5',
+  './attendance-engine.js?v=rc5',
+  './config.js?v=rc5',
   './manifest.json',
   './logo.png',
   './moncer-white.png',
