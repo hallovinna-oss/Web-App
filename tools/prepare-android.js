@@ -6,7 +6,8 @@ let manifest = fs.readFileSync(manifestPath, 'utf8');
 const permissions = [
   'android.permission.ACCESS_COARSE_LOCATION',
   'android.permission.ACCESS_FINE_LOCATION',
-  'android.permission.CAMERA'
+  'android.permission.CAMERA',
+  'android.permission.POST_NOTIFICATIONS'
 ];
 for (const permission of permissions) {
   if (!manifest.includes(permission)) {
@@ -18,4 +19,3 @@ for (const permission of permissions) {
 }
 fs.writeFileSync(manifestPath, manifest, 'utf8');
 console.log('Android location and camera permissions configured.');
-
