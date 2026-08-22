@@ -318,6 +318,13 @@ const AppState = {
       if (user && !this.firebaseListenersStarted) {
         this.firebaseListenersStarted = true;
         FirebaseBackend.startListeners(this);
+      } else if (!user && this.currentUser) {
+        // Never keep a local-only "logged in" screen: cloud writes require a
+        // verified Firebase user. The next login is then persisted by Firebase.
+        this.currentUser = null;
+        this.firebaseListenersStarted = false;
+        this.clearPersistedCurrentUser();
+        this.render();
       }
     });
   },

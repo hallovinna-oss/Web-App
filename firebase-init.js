@@ -14,7 +14,10 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(console.error);
+// Keep the real Firebase session aligned with MIPHA's persisted UI session.
+// Without LOCAL persistence a newly opened tab can look logged in locally while
+// Firebase (required for secure file uploads) has no authenticated user.
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
 
 const FirebaseBackend = {
   auth,
