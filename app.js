@@ -2947,7 +2947,7 @@ const AppState = {
           alert('✅ Data file berhasil diimpor. Silakan periksa kembali data presensi di halaman laporan.');
         } catch (error) {
           console.error('Import file error:', error);
-          alert('⚠️ Gagal mengimpor data. Pastikan file dalam format yang benar.');
+          alert(`⚠️ Gagal mengimpor data: ${error.message || 'Pastikan file dalam format yang benar.'}`);
         }
       };
     }
@@ -3340,12 +3340,13 @@ const AppState = {
     }
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const arrayBuffer = e.target.result;
           const workbook = XLSX.read(arrayBuffer, { type: 'array' });
           const studentNisMap = new Map(this.students.map((student) => [String(student.nis), student]));
           const dailyUpdates = {};
+          const cloudUpdates = [];
 
           workbook.SheetNames.forEach((sheetName) => {
             const sheet = workbook.Sheets[sheetName];
@@ -3391,15 +3392,27 @@ const AppState = {
               this.students.forEach((student) => {
                 if (!this.monthlyAttendance[student.id]) this.monthlyAttendance[student.id] = {};
                 this.monthlyAttendance[student.id][dateKey] = payload.defaultStatus;
+                if (!this.historicalAttendance[student.id]) this.historicalAttendance[student.id] = {};
+                this.historicalAttendance[student.id][dateKey] = payload.defaultStatus;
+                cloudUpdates.push({ studentId: student.id, date: dateKey, status: payload.defaultStatus });
               });
             }
             Object.entries(payload.statusByStudent).forEach(([studentId, status]) => {
               if (!this.monthlyAttendance[studentId]) this.monthlyAttendance[studentId] = {};
               this.monthlyAttendance[studentId][dateKey] = status;
+              if (!this.historicalAttendance[studentId]) this.historicalAttendance[studentId] = {};
+              this.historicalAttendance[studentId][dateKey] = status;
+              cloudUpdates.push({ studentId, date: dateKey, status });
             });
           });
 
+          if (!cloudUpdates.length) throw new Error('Tidak ada data absensi yang berhasil dibaca dari file.');
+          if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
+            throw new Error('Login Firebase diperlukan untuk menyimpan hasil impor.');
+          }
+          await FirebaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
           localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
+          localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
           this.saveState();
           this.render();
           resolve();
@@ -3471,6 +3484,7 @@ const AppState = {
     const year = typeof importYear === 'number' ? importYear : todayYear;
     const month = typeof importMonth === 'number' ? importMonth : todayMonth;
     let updatedCount = 0;
+    const cloudUpdates = [];
 
     rows.slice(1).forEach((row) => {
       const nis = String(row[nisIndex] || '').trim();
@@ -3489,6 +3503,9 @@ const AppState = {
             ? col.dateKey
             : `${year}-${String(month + 1).padStart(2, '0')}-${String(col.dayNum).padStart(2, '0')}`;
           this.monthlyAttendance[student.id][dateKey] = status;
+          if (!this.historicalAttendance[student.id]) this.historicalAttendance[student.id] = {};
+          this.historicalAttendance[student.id][dateKey] = status;
+          cloudUpdates.push({ studentId: student.id, date: dateKey, status });
           updatedCount += 1;
         });
       } else {
@@ -3518,7 +3535,15 @@ const AppState = {
 
     if (!updatedCount) throw new Error('Tidak ada baris siswa yang berhasil dipetakan.');
 
+    if (cloudUpdates.length) {
+      if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
+        throw new Error('Login Firebase diperlukan untuk menyimpan hasil impor.');
+      }
+      await FirebaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
+    }
+
     localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
+    localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
     this.saveState();
     this.render();
   },
