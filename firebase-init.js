@@ -33,11 +33,11 @@ const FirebaseBackend = {
     this.syncTimer = setTimeout(() => this.syncState(appState).catch(console.error), 500);
   },
 
-  async uploadFile(file, category, ownerId) {
+  async uploadFile(file, category, ownerId, metadata = {}) {
     if (!auth.currentUser) throw new Error('Login diperlukan untuk mengunggah file.');
     if (!file || file.size <= 0) throw new Error('File tidak valid.');
     if (file.size > 4 * 1024 * 1024) throw new Error('Ukuran file maksimal 4 MB.');
-    const allowed = /^(image\/|application\/pdf$|text\/plain$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.)/;
+    const allowed = /^(image\/|application\/pdf$|application\/json$|text\/plain$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.)/;
     if (!allowed.test(file.type || '')) throw new Error('Jenis file tidak didukung.');
     const token = await auth.currentUser.getIdToken();
     const data = await new Promise((resolve, reject) => {
@@ -49,7 +49,7 @@ const FirebaseBackend = {
     const response = await fetch('/.netlify/functions/storage-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ category, ownerId, name: file.name, type: file.type, size: file.size, data })
+      body: JSON.stringify({ category, ownerId, metadata, name: file.name, type: file.type, size: file.size, data })
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || 'Penyimpanan file gagal.');

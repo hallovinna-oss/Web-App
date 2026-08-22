@@ -526,12 +526,12 @@ const AppState = {
     if (window.FirebaseBackend) FirebaseBackend.scheduleSync(this);
   },
 
-  async uploadCloudFile(file, category, ownerId) {
+  async uploadCloudFile(file, category, ownerId, metadata = {}) {
     if (!file) return null;
     if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
       throw new Error('Login Firebase diperlukan untuk menyimpan file di cloud.');
     }
-    return FirebaseBackend.uploadFile(file, category, ownerId);
+    return FirebaseBackend.uploadFile(file, category, ownerId, metadata);
   },
 
   generateEmptyDailyAttendance() {
@@ -1062,7 +1062,7 @@ const AppState = {
 
   submitLeaveRequest(data) {
     const newLeave = {
-      id: `lv_${Date.now()}`,
+      id: data.id || `lv_${Date.now()}`,
       studentId: this.currentUser.id,
       studentName: this.currentUser.name,
       type: data.type,
@@ -1071,11 +1071,15 @@ const AppState = {
       reason: data.reason,
       attachment: data.attachmentName || null,
       attachmentData: data.attachmentData || null,
+      attachmentPath: data.attachmentPath || null,
+      attachmentType: data.attachmentType || null,
+      attachmentSize: data.attachmentSize || null,
+      archivePath: data.archivePath || null,
       attachmentSaved: data.attachmentSaved || null,
       parentPhone: data.parentPhone,
       status: 'pending',
       teacherNote: null,
-      submittedAt: new Date().toLocaleString('id-ID')
+      submittedAt: data.submittedAt || new Date().toLocaleString('id-ID')
     };
 
     this.leaveRequests.unshift(newLeave);
@@ -2208,10 +2212,9 @@ const AppState = {
     return `
       <div class="card">
         <div class="card-title">📝 Form Pengajuan Izin / Sakit</div>
-      ${(!this.currentUser.homeLat || !this.currentUser.homeLng) ? `
+      ${!this.currentUser.parentPhone ? `
         <div class="alert alert-warning" style="margin-bottom:1rem;">
-          Sebelum mengajukan izin, simpan lokasi rumah Anda terlebih dahulu di <strong>Profil Siswa</strong>.
-          <button type="button" class="btn btn-secondary" data-view="profile" style="margin-top:0.75rem;">Atur Lokasi Sekarang</button>
+          Nomor WhatsApp orang tua/wali wajib diisi untuk mengajukan izin. Lokasi rumah dapat dilengkapi nanti.
         </div>
       ` : ''}
         <form id="form-submit-leave">
@@ -2518,7 +2521,10 @@ const AppState = {
     const submissions = Array.isArray(assignment.submissions) ? assignment.submissions : [];
     const existingIndex = submissions.findIndex((item) => item.studentId === studentId);
     const attachmentName = file ? file.name : null;
-    const cloudFile = file ? await this.uploadCloudFile(file, 'assignment-submissions', `${assignmentId}_${studentId}`) : null;
+    const cloudFile = file ? await this.uploadCloudFile(file, 'pengumpulan-tugas', studentId, {
+      type: assignment.subject || 'tugas',
+      recordId: assignmentId
+    }) : null;
     const submission = {
       studentId,
       studentName: this.currentUser.name,
@@ -2780,31 +2786,32 @@ const AppState = {
     if (formLeave) {
       formLeave.onsubmit = async (e) => {
         e.preventDefault();
-        if (this.currentUser.role === 'siswa' && (!this.currentUser.homeLat || !this.currentUser.homeLng)) {
-          alert('⚠️ Sebelum mengajukan izin, simpan lokasi rumah Anda terlebih dahulu di Profil Siswa.');
-          this.switchView('profile');
+        const parentPhoneInput = document.getElementById('leave-parent-phone');
+        const parentPhone = String(parentPhoneInput?.value || '').trim();
+        const parentPhoneDigits = parentPhone.replace(/\D/g, '');
+        if (parentPhoneDigits.length < 10 || parentPhoneDigits.length > 15) {
+          alert('⚠️ Masukkan nomor WhatsApp orang tua/wali yang valid (10–15 angka).');
+          parentPhoneInput?.focus();
           return;
         }
         const fileInput = document.getElementById('leave-file');
         const file = fileInput ? fileInput.files[0] : null;
 
-        const doSubmit = async (cloudFile) => {
+        const doSubmit = async (cloudFile, archiveFile, requestData) => {
           let attachmentSaved = null;
           if (file && this.uploadsDir) {
             attachmentSaved = await this.saveFileToUploads(file);
           }
 
           const data = {
-            type: document.getElementById('leave-type').value,
-            startDate: document.getElementById('leave-start').value,
-            endDate: document.getElementById('leave-end').value,
-            reason: document.getElementById('leave-reason').value,
-            parentPhone: document.getElementById('leave-parent-phone').value,
+            ...requestData,
+            parentPhone,
             attachmentName: file ? file.name : null,
             attachmentData: cloudFile ? cloudFile.url : null,
             attachmentPath: cloudFile ? cloudFile.path : null,
             attachmentType: cloudFile ? cloudFile.type : null,
             attachmentSize: cloudFile ? cloudFile.size : null,
+            archivePath: archiveFile ? archiveFile.path : null,
             attachmentSaved: attachmentSaved
           };
           this.submitLeaveRequest(data);
@@ -2815,10 +2822,30 @@ const AppState = {
         };
 
         try {
-          const cloudFile = file ? await this.uploadCloudFile(file, 'leave-requests', this.currentUser.id) : null;
-          await doSubmit(cloudFile);
+          const requestData = {
+            id: `lv_${Date.now()}`,
+            type: document.getElementById('leave-type').value,
+            startDate: document.getElementById('leave-start').value,
+            endDate: document.getElementById('leave-end').value,
+            reason: document.getElementById('leave-reason').value.trim(),
+            submittedAt: new Date().toISOString()
+          };
+          const folderMeta = { date: requestData.startDate, type: requestData.type, recordId: requestData.id };
+          const cloudFile = file ? await this.uploadCloudFile(file, 'pengajuan-izin', this.currentUser.id, folderMeta) : null;
+          const archiveData = {
+            ...requestData,
+            studentId: this.currentUser.id,
+            studentName: this.currentUser.name,
+            parentPhone,
+            attachmentName: file ? file.name : null,
+            status: 'pending'
+          };
+          const archiveBlob = new Blob([JSON.stringify(archiveData, null, 2)], { type: 'application/json' });
+          const archiveUpload = new File([archiveBlob], 'data-pengajuan.json', { type: 'application/json' });
+          const archiveFile = await this.uploadCloudFile(archiveUpload, 'pengajuan-izin', this.currentUser.id, folderMeta);
+          await doSubmit(cloudFile, archiveFile, requestData);
         } catch (error) {
-          alert('Gagal mengunggah lampiran izin: ' + error.message);
+          alert('Gagal mengarsipkan pengajuan izin: ' + error.message);
         }
       };
     }
