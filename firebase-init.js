@@ -302,6 +302,40 @@ const FirebaseBackend = {
     return db.collection('attendance').doc(`${dateKey}_${studentId}`).set(attendanceDoc, { merge: true });
   },
 
+  async writeImportedAttendanceRecords(records, students = []) {
+    if (!auth.currentUser) throw new Error('Login Firebase diperlukan untuk menyimpan hasil impor.');
+    if (!Array.isArray(records) || !records.length) throw new Error('Tidak ada data absensi untuk disimpan.');
+    const studentMap = new Map(students.map(student => [student.id, student]));
+    const recordsByDocument = new Map();
+    records.forEach(record => {
+      const status = this.normalizeAttendanceStatus(record.status);
+      if (!record.studentId || !record.date || !status) return;
+      const student = studentMap.get(record.studentId);
+      recordsByDocument.set(`${record.date}_${record.studentId}`, {
+        ref: db.collection('attendance').doc(`${record.date}_${record.studentId}`),
+        data: this.sanitizeFirestoreValue({
+          studentId: record.studentId,
+          studentNis: student?.nis || null,
+          studentName: student?.name || null,
+          date: record.date,
+          status,
+          source: 'spreadsheet_import',
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        })
+      });
+    });
+    const validRecords = Array.from(recordsByDocument.values());
+    if (!validRecords.length) throw new Error('Tidak ada data absensi valid untuk disimpan.');
+
+    // Keep comfortably below Firestore's batch write limit.
+    for (let index = 0; index < validRecords.length; index += 400) {
+      const batch = db.batch();
+      validRecords.slice(index, index + 400).forEach(item => batch.set(item.ref, item.data, { merge: true }));
+      await batch.commit();
+    }
+    return validRecords.length;
+  },
+
   async writeAssignmentSubmission(assignmentId, submission) {
     if (!auth.currentUser) throw new Error('Login diperlukan.');
     const clean = this.sanitizeFirestoreValue({ ...submission, assignmentId, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
