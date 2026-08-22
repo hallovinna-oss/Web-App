@@ -40,6 +40,13 @@ service cloud.firestore {
     }
     match /announcements/{id} { allow read: if signedIn(); allow write: if isTeacher(); }
     match /assignments/{id} { allow read: if signedIn(); allow write: if isTeacher(); }
+    match /assignmentSubmissions/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+                            && request.resource.data.studentId == me().data.id;
+      allow delete: if isTeacher();
+    }
     match /homeVisits/{id} { allow read, write: if isTeacher(); }
+    match /settings/{id} { allow read: if signedIn(); allow write: if isTeacher(); }
   }
 }

@@ -516,6 +516,15 @@ const AppState = {
     if (this.currentUser) {
       this.persistCurrentUser();
     }
+    if (window.FirebaseBackend) FirebaseBackend.scheduleSync(this);
+  },
+
+  async uploadCloudFile(file, category, ownerId) {
+    if (!file) return null;
+    if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
+      throw new Error('Login Firebase diperlukan untuk menyimpan file di cloud.');
+    }
+    return FirebaseBackend.uploadFile(file, category, ownerId);
   },
 
   generateEmptyDailyAttendance() {
@@ -1110,10 +1119,16 @@ const AppState = {
     }
   },
 
-  openAttachment(leaveId) {
+  async openAttachment(leaveId) {
     const leave = this.leaveRequests.find(l => l.id === leaveId);
     if (!leave || !leave.attachmentData) return;
-    if (leave.attachmentData.startsWith('data:image')) {
+    if (leave.attachmentPath) {
+      try {
+        await FirebaseBackend.downloadFile(leave.attachmentPath, leave.attachmentName || leave.attachment);
+      } catch (error) {
+        alert('Gagal membuka lampiran: ' + error.message);
+      }
+    } else if (leave.attachmentData.startsWith('data:image')) {
       this.attachmentLightbox = { data: leave.attachmentData, name: leave.attachment };
       this.render();
     } else {
@@ -2496,14 +2511,17 @@ const AppState = {
     const submissions = Array.isArray(assignment.submissions) ? assignment.submissions : [];
     const existingIndex = submissions.findIndex((item) => item.studentId === studentId);
     const attachmentName = file ? file.name : null;
-    const attachmentData = file ? await this.readFileAsDataURL(file) : null;
+    const cloudFile = file ? await this.uploadCloudFile(file, 'assignment-submissions', `${assignmentId}_${studentId}`) : null;
     const submission = {
       studentId,
       studentName: this.currentUser.name,
       submittedAt: new Date().toISOString(),
       note: String(note || '').trim(),
       attachmentName,
-      attachmentData
+      attachmentData: cloudFile ? cloudFile.url : null,
+      attachmentPath: cloudFile ? cloudFile.path : null,
+      attachmentType: cloudFile ? cloudFile.type : null,
+      attachmentSize: cloudFile ? cloudFile.size : null
     };
     if (existingIndex >= 0) {
       submissions[existingIndex] = submission;
@@ -2513,6 +2531,7 @@ const AppState = {
     assignment.submissions = submissions;
     assignment.submittedBy = submissions.map((item) => item.studentId);
     assignment.submitted = submissions.length;
+    if (window.FirebaseBackend) await FirebaseBackend.writeAssignmentSubmission(assignmentId, submission);
     this.logAudit(`Mengumpulkan tugas: ${assignment.title}`);
     this.activeAssignmentSubmissionId = null;
     this.saveState();
@@ -2547,7 +2566,7 @@ const AppState = {
               <h3 style="margin:0.4rem 0 0.25rem;">${assignment.title}</h3>
               ${assignment.description ? `<p style="margin:0 0 0.4rem;color:var(--text-main);">${assignment.description}</p>` : ''}
               <small>Deadline: ${assignment.dueDate || '-'}</small>
-              ${hasAttachment ? `<div style="margin-top:0.4rem;font-size:0.8rem;">📎 Lampiran: <a href="${assignment.attachmentData || '#'}" target="_blank" rel="noopener" style="color:var(--accent-magenta);font-weight:700;">${assignment.attachmentName || 'Buka lampiran'}</a></div>` : ''}
+              ${hasAttachment ? `<div style="margin-top:0.4rem;font-size:0.8rem;">📎 Lampiran: <button type="button" class="btn-link btn-preview-attachment" data-attachment="${assignment.attachmentData || ''}" data-path="${assignment.attachmentPath || ''}" data-name="${assignment.attachmentName || 'lampiran'}">${assignment.attachmentName || 'Buka lampiran'}</button></div>` : ''}
             </div>
             <div class="assignment-progress" style="min-width:140px;">
               <b>${submittedCount}/${assignment.total || 0}</b>
@@ -2568,7 +2587,7 @@ const AppState = {
           ${isGuru ? `<button class="btn btn-secondary btn-share-assignment" data-id="${assignment.id}" style="margin-top:.6rem">📱 Share to WhatsApp</button>` : ''}
           ${isGuru && submissions.length ? `<div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-muted);">
             <div style="font-weight:700;color:var(--primary-dark);margin-bottom:0.35rem;">Pengumpulan (${submissions.length})</div>
-            ${submissions.slice(0, 4).map((item) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;margin-top:0.25rem;">${item.studentName || 'Siswa'}${item.attachmentName ? ` <span style="color:var(--accent-magenta);">• ${item.attachmentName}</span>` : ''}${item.attachmentData ? `<button class="btn btn-secondary btn-preview-attachment" data-attachment="${item.attachmentData}" data-name="${item.attachmentName || 'lampiran'}" style="padding:0.2rem 0.45rem;font-size:0.7rem;">Preview</button>` : ''}</div>`).join('')}
+            ${submissions.slice(0, 4).map((item) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;margin-top:0.25rem;">${item.studentName || 'Siswa'}${item.attachmentName ? ` <span style="color:var(--accent-magenta);">• ${item.attachmentName}</span>` : ''}${item.attachmentData ? `<button class="btn btn-secondary btn-preview-attachment" data-attachment="${item.attachmentData}" data-path="${item.attachmentPath || ''}" data-name="${item.attachmentName || 'lampiran'}" style="padding:0.2rem 0.45rem;font-size:0.7rem;">Preview</button>` : ''}</div>`).join('')}
           </div>` : ''}
         </article>`;
       }).join('')}</div>`;
@@ -2581,10 +2600,11 @@ const AppState = {
   },
 
   setupViewEvents() {
+    if (window.FirebaseBackend) FirebaseBackend.hydrateProtectedImages(document);
     const themeBtn = document.getElementById('btn-theme-toggle');
     if (themeBtn) themeBtn.onclick = () => this.cycleTheme();
     const teacherPhoto = document.getElementById('teacher-photo-input');
-    if (teacherPhoto) teacherPhoto.onchange = () => { const f=teacherPhoto.files[0]; if(!f)return; const r=new FileReader(); r.onload=e=>{this.teacherProfile.photo=e.target.result; this.saveState(); this.render();}; r.readAsDataURL(f); };
+    if (teacherPhoto) teacherPhoto.onchange = async () => { const f=teacherPhoto.files[0]; if(!f)return; try { const uploaded=await this.uploadCloudFile(f,'profiles',this.currentUser.id); this.teacherProfile.photo=uploaded.url; this.teacherProfile.photoPath=uploaded.path; this.saveState(); this.render(); } catch(error) { alert('Gagal mengunggah foto: '+error.message); } };
     const profileForm=document.getElementById('teacher-profile-form');
     if(profileForm) profileForm.onsubmit=e=>{e.preventDefault(); this.teacherProfile={...this.teacherProfile,name:document.getElementById('tp-name').value,title:document.getElementById('tp-title').value,subject:document.getElementById('tp-subject').value,phone:document.getElementById('tp-phone').value,email:document.getElementById('tp-email').value,bio:document.getElementById('tp-bio').value}; this.currentUser.name=this.teacherProfile.name; this.saveState(); alert('✅ Teacher profile saved.'); this.render();};
     const studentProfileForm=document.getElementById('student-profile-form');
@@ -2599,6 +2619,10 @@ const AppState = {
       const name = btn.dataset.name || 'lampiran';
       const data = btn.dataset.attachment;
       if (!data) return;
+      if (btn.dataset.path) {
+        FirebaseBackend.downloadFile(btn.dataset.path, name).catch(error => alert('Gagal membuka lampiran: '+error.message));
+        return;
+      }
       const win = window.open('', '_blank');
       if (!win) return alert('Izinkan popup untuk melihat lampiran tugas.');
       win.document.write(`<html><body style="font-family:sans-serif;padding:20px;"><h3>${name}</h3><p>Preview lampiran tugas</p><img src="${data}" alt="${name}" style="max-width:100%;border-radius:8px;" /></body></html>`);
@@ -2611,7 +2635,7 @@ const AppState = {
     const newVisit=document.getElementById('btn-new-home-visit'); if(newVisit)newVisit.onclick=()=>{this.visitEditorOpen=true;this.editingVisitId=null;this.render();};
     const cancelVisit=document.getElementById('btn-cancel-visit'); if(cancelVisit)cancelVisit.onclick=()=>{this.visitEditorOpen=false;this.render();};
     const studentPicker=document.getElementById('hv-student'); if(studentPicker)studentPicker.onchange=()=>{const st=this.students.find(x=>x.id===studentPicker.value);const p=document.getElementById('hv-family-preview');if(st&&p)p.innerHTML=`<b>${st.name}</b><br>📍 ${st.address||'Home address not completed'}<br>📱 ${st.parentPhone||'Parent WhatsApp not completed'}<br>${st.homeLat!=null?'✅ Home GPS saved':'⚠️ Home GPS not saved yet'}`;};
-    const photoInput=document.getElementById('hv-photos'); if(photoInput)photoInput.onchange=()=>{const preview=document.getElementById('hv-photo-preview');if(!preview)return;preview.innerHTML='';[...photoInput.files].slice(0,4).forEach(file=>{const r=new FileReader();r.onload=()=>{const img=document.createElement('img');img.src=r.result;img.alt='Photo preview';preview.appendChild(img)};r.readAsDataURL(file);});}; const visitForm=document.getElementById('home-visit-form'); if(visitForm)visitForm.onsubmit=async e=>{e.preventDefault();const st=this.students.find(x=>x.id===document.getElementById('hv-student').value);if(!st)return alert('Choose a student.');const files=[...document.getElementById('hv-photos').files];const desiredStatus=document.getElementById('hv-status').value;if(desiredStatus==='completed'&&!files.length)return alert('⚠️ A proof photo is required before saving a completed visit.');if(files.length&&!document.getElementById('hv-permission').checked)return alert('Confirm parent/guardian photo permission first.');const photos=await Promise.all(files.slice(0,4).map(f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f);})));this.homeVisits.unshift({id:'hv_'+Date.now(),studentId:st.id,status:document.getElementById('hv-status').value,scheduledDate:document.getElementById('hv-date').value,address:st.address||'Address not completed',parentPhone:st.parentPhone||'',reason:document.getElementById('hv-reason').value,notes:document.getElementById('hv-notes').value.trim(),followUpAction:document.getElementById('hv-followup').value.trim(),followUp:Boolean(document.getElementById('hv-followup').value.trim()),photos,photoPermission:document.getElementById('hv-permission').checked,createdAt:new Date().toISOString()});this.visitEditorOpen=false;this.saveState();alert('✅ Home visit saved.');this.render();};
+    const photoInput=document.getElementById('hv-photos'); if(photoInput)photoInput.onchange=()=>{const preview=document.getElementById('hv-photo-preview');if(!preview)return;preview.innerHTML='';[...photoInput.files].slice(0,4).forEach(file=>{const r=new FileReader();r.onload=()=>{const img=document.createElement('img');img.src=r.result;img.alt='Photo preview';preview.appendChild(img)};r.readAsDataURL(file);});}; const visitForm=document.getElementById('home-visit-form'); if(visitForm)visitForm.onsubmit=async e=>{e.preventDefault();const st=this.students.find(x=>x.id===document.getElementById('hv-student').value);if(!st)return alert('Choose a student.');const files=[...document.getElementById('hv-photos').files];const desiredStatus=document.getElementById('hv-status').value;if(desiredStatus==='completed'&&!files.length)return alert('⚠️ A proof photo is required before saving a completed visit.');if(files.length&&!document.getElementById('hv-permission').checked)return alert('Confirm parent/guardian photo permission first.');try{const uploaded=await Promise.all(files.slice(0,4).map(f=>this.uploadCloudFile(f,'home-visits',st.id)));const photos=uploaded.map(x=>x.url);const photoPaths=uploaded.map(x=>x.path);this.homeVisits.unshift({id:'hv_'+Date.now(),studentId:st.id,status:document.getElementById('hv-status').value,scheduledDate:document.getElementById('hv-date').value,address:st.address||'Address not completed',parentPhone:st.parentPhone||'',reason:document.getElementById('hv-reason').value,notes:document.getElementById('hv-notes').value.trim(),followUpAction:document.getElementById('hv-followup').value.trim(),followUp:Boolean(document.getElementById('hv-followup').value.trim()),photos,photoPaths,photoPermission:document.getElementById('hv-permission').checked,createdAt:new Date().toISOString()});this.visitEditorOpen=false;this.saveState();alert('✅ Home visit saved.');this.render();}catch(error){alert('Gagal mengunggah dokumentasi: '+error.message);}};
     const newAssignment=document.getElementById('btn-new-assignment'); if(newAssignment)newAssignment.onclick=()=>this.addAssignmentFromPrompt();
     const assignmentForm=document.getElementById('assignment-form');
     if(assignmentForm) assignmentForm.onsubmit=async (e)=>{
@@ -2622,8 +2646,8 @@ const AppState = {
       const description=document.getElementById('assignment-description').value.trim();
       const attachmentFile=document.getElementById('assignment-attachment').files[0];
       if(!title){ alert('Judul tugas wajib diisi.'); return; }
-      const attachmentData = attachmentFile ? await this.readFileAsDataURL(attachmentFile) : null;
-      const assignment={id:`as_${Date.now()}`,title,subject:subject||'Dasar Animasi',dueDate,description,submitted:0,total:this.students.length||0,submittedBy:[],submissions:[],attachmentName:attachmentFile?attachmentFile.name:null,attachmentData};
+      const cloudFile = attachmentFile ? await this.uploadCloudFile(attachmentFile,'assignments',this.currentUser.id) : null;
+      const assignment={id:`as_${Date.now()}`,title,subject:subject||'Dasar Animasi',dueDate,description,submitted:0,total:this.students.length||0,submittedBy:[],submissions:[],attachmentName:cloudFile?cloudFile.name:null,attachmentData:cloudFile?cloudFile.url:null,attachmentPath:cloudFile?cloudFile.path:null};
       this.assignments.unshift(assignment);
       this.logAudit(`Membuat tugas: ${assignment.title}`);
       this.saveState();
@@ -2747,7 +2771,7 @@ const AppState = {
 
     const formLeave = document.getElementById('form-submit-leave');
     if (formLeave) {
-      formLeave.onsubmit = (e) => {
+      formLeave.onsubmit = async (e) => {
         e.preventDefault();
         if (this.currentUser.role === 'siswa' && (!this.currentUser.homeLat || !this.currentUser.homeLng)) {
           alert('⚠️ Sebelum mengajukan izin, simpan lokasi rumah Anda terlebih dahulu di Profil Siswa.');
@@ -2757,7 +2781,7 @@ const AppState = {
         const fileInput = document.getElementById('leave-file');
         const file = fileInput ? fileInput.files[0] : null;
 
-        const doSubmit = async (attachmentData) => {
+        const doSubmit = async (cloudFile) => {
           let attachmentSaved = null;
           if (file && this.uploadsDir) {
             attachmentSaved = await this.saveFileToUploads(file);
@@ -2770,7 +2794,10 @@ const AppState = {
             reason: document.getElementById('leave-reason').value,
             parentPhone: document.getElementById('leave-parent-phone').value,
             attachmentName: file ? file.name : null,
-            attachmentData: attachmentData || null,
+            attachmentData: cloudFile ? cloudFile.url : null,
+            attachmentPath: cloudFile ? cloudFile.path : null,
+            attachmentType: cloudFile ? cloudFile.type : null,
+            attachmentSize: cloudFile ? cloudFile.size : null,
             attachmentSaved: attachmentSaved
           };
           this.submitLeaveRequest(data);
@@ -2780,13 +2807,11 @@ const AppState = {
           this.render();
         };
 
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (ev) => doSubmit(ev.target.result);
-          reader.onerror = () => doSubmit(null);
-          reader.readAsDataURL(file);
-        } else {
-          doSubmit(null);
+        try {
+          const cloudFile = file ? await this.uploadCloudFile(file, 'leave-requests', this.currentUser.id) : null;
+          await doSubmit(cloudFile);
+        } catch (error) {
+          alert('Gagal mengunggah lampiran izin: ' + error.message);
         }
       };
     }

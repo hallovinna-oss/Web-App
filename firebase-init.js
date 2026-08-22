@@ -1,4 +1,4 @@
-/* MIPHA COMPANION — Firebase bridge (Auth + Firestore, no Storage) */
+/* MIPHA COMPANION — Firebase bridge (Auth + Firestore + private file gateway) */
 const firebaseConfig = {
   apiKey: "AIzaSyCz7C-Vq-l9Q1Vp3F_gFmbznmiLPs1ICPY",
   authDomain: "mipha-companion.firebaseapp.com",
@@ -21,6 +21,81 @@ const FirebaseBackend = {
   db,
   unsubscribers: [],
   renderQueued: false,
+  syncTimer: null,
+  fileUrlCache: new Map(),
+
+  scheduleSync(appState) {
+    if (!auth.currentUser) return;
+    clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => this.syncState(appState).catch(console.error), 500);
+  },
+
+  async uploadFile(file, category, ownerId) {
+    if (!auth.currentUser) throw new Error('Login diperlukan untuk mengunggah file.');
+    if (!file || file.size <= 0) throw new Error('File tidak valid.');
+    if (file.size > 4 * 1024 * 1024) throw new Error('Ukuran file maksimal 4 MB.');
+    const allowed = /^(image\/|application\/pdf$|text\/plain$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.)/;
+    if (!allowed.test(file.type || '')) throw new Error('Jenis file tidak didukung.');
+    const token = await auth.currentUser.getIdToken();
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = () => reject(new Error('File tidak dapat dibaca.'));
+      reader.readAsDataURL(file);
+    });
+    const response = await fetch('/.netlify/functions/storage-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ category, ownerId, name: file.name, type: file.type, size: file.size, data })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Penyimpanan file gagal.');
+    return result;
+  },
+
+  async downloadFile(path, name) {
+    if (!auth.currentUser) throw new Error('Login diperlukan untuk membuka file.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/.netlify/functions/storage-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ path })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'File tidak dapat dibuka.');
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name || 'lampiran';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  },
+
+  async getFileObjectUrl(path) {
+    if (this.fileUrlCache.has(path)) return this.fileUrlCache.get(path);
+    if (!auth.currentUser) throw new Error('Login diperlukan untuk membuka file.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/.netlify/functions/storage-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ path })
+    });
+    if (!response.ok) throw new Error('Gambar tidak dapat dimuat.');
+    const url = URL.createObjectURL(await response.blob());
+    this.fileUrlCache.set(path, url);
+    return url;
+  },
+
+  hydrateProtectedImages(root = document) {
+    root.querySelectorAll('img[src^="nextcloud:"]').forEach(img => {
+      const path = img.getAttribute('src').slice('nextcloud:'.length);
+      this.getFileObjectUrl(path).then(url => { img.src = url; }).catch(() => { img.alt = 'Gambar tidak dapat dimuat'; });
+    });
+  },
 
   requestRender(appState) {
     if (this.renderQueued) return;
@@ -162,18 +237,22 @@ const FirebaseBackend = {
 
     (state.leaveRequests || []).forEach(item => {
       const clean = this.sanitizeFirestoreValue({ ...item });
-      delete clean.attachmentData;
       writes.push(db.collection('leaveRequests').doc(item.id).set({ ...clean, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }));
     });
 
     (state.announcements || []).forEach(item => writes.push(db.collection('announcements').doc(item.id).set(item, { merge: true })));
-    (state.assignments || []).forEach(item => writes.push(db.collection('assignments').doc(item.id).set(item, { merge: true })));
+    if (state.currentUser?.role === 'guru') {
+      (state.assignments || []).forEach(item => writes.push(db.collection('assignments').doc(item.id).set(item, { merge: true })));
+    }
 
     (state.homeVisits || []).forEach(item => {
       const clean = this.sanitizeFirestoreValue({ ...item });
-      delete clean.photos;
       writes.push(db.collection('homeVisits').doc(item.id).set(clean, { merge: true }));
     });
+
+    if (state.currentUser?.role === 'guru') {
+      writes.push(db.collection('settings').doc('teacherProfile').set(this.sanitizeFirestoreValue(state.teacherProfile || {}), { merge: true }));
+    }
 
     if (state.currentUser?.role === 'guru') {
       (state.students || []).forEach(student => {
@@ -212,6 +291,12 @@ const FirebaseBackend = {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     return db.collection('attendance').doc(`${dateKey}_${studentId}`).set(attendanceDoc, { merge: true });
+  },
+
+  async writeAssignmentSubmission(assignmentId, submission) {
+    if (!auth.currentUser) throw new Error('Login diperlukan.');
+    const clean = this.sanitizeFirestoreValue({ ...submission, assignmentId, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    return db.collection('assignmentSubmissions').doc(`${assignmentId}_${submission.studentId}`).set(clean, { merge: true });
   },
 
   startListeners(appState) {
@@ -265,6 +350,42 @@ const FirebaseBackend = {
         const refreshed = appState.students.find(s => s.id === appState.currentUser.id);
         if (refreshed) appState.currentUser = { ...appState.currentUser, ...refreshed };
       }
+      this.requestRender(appState);
+    }, console.error));
+
+    this.unsubscribers.push(db.collection('assignments').onSnapshot(snapshot => {
+      appState.assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      this.requestRender(appState);
+    }, console.error));
+
+    this.unsubscribers.push(db.collection('assignmentSubmissions').onSnapshot(snapshot => {
+      const grouped = {};
+      snapshot.docs.forEach(doc => {
+        const item = { id: doc.id, ...doc.data() };
+        if (!item.assignmentId) return;
+        if (!grouped[item.assignmentId]) grouped[item.assignmentId] = [];
+        grouped[item.assignmentId].push(item);
+      });
+      appState.assignments.forEach(assignment => {
+        assignment.submissions = grouped[assignment.id] || [];
+        assignment.submittedBy = assignment.submissions.map(item => item.studentId);
+        assignment.submitted = assignment.submissions.length;
+      });
+      this.requestRender(appState);
+    }, console.error));
+
+    this.unsubscribers.push(db.collection('homeVisits').onSnapshot(snapshot => {
+      appState.homeVisits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      this.requestRender(appState);
+    }, console.error));
+
+    this.unsubscribers.push(db.collection('announcements').onSnapshot(snapshot => {
+      appState.announcements = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      this.requestRender(appState);
+    }, console.error));
+
+    this.unsubscribers.push(db.collection('settings').doc('teacherProfile').onSnapshot(snapshot => {
+      if (snapshot.exists) appState.teacherProfile = { ...appState.teacherProfile, ...snapshot.data() };
       this.requestRender(appState);
     }, console.error));
   }
