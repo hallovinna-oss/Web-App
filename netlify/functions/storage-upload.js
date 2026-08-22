@@ -7,11 +7,22 @@ exports.handler = async (event) => {
     const input = JSON.parse(event.body || '{}');
     const size = Number(input.size || 0);
     if (!input.data || size <= 0 || size > 4 * 1024 * 1024) return json(400, { error: 'File harus berukuran 1 byte sampai 4 MB.' });
-    const allowed = /^(image\/|application\/pdf$|text\/plain$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.)/;
+    const allowed = /^(image\/|application\/pdf$|application\/json$|text\/plain$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.)/;
     if (!allowed.test(input.type || '')) return json(400, { error: 'Jenis file tidak didukung.' });
 
     const cfg = config();
-    const folder = [cfg.root, safeSegment(input.category, 'documents'), safeSegment(input.ownerId || user.localId, user.localId)].join('/');
+    const uploadDate = /^\d{4}-\d{2}-\d{2}$/.test(input.metadata?.date || '')
+      ? input.metadata.date
+      : new Date().toISOString().slice(0, 10);
+    const folder = [
+      cfg.root,
+      'data-siswa',
+      safeSegment(input.ownerId || user.localId, user.localId),
+      safeSegment(input.category, 'documents'),
+      uploadDate,
+      safeSegment(input.metadata?.type, 'umum'),
+      safeSegment(input.metadata?.recordId, 'files')
+    ].join('/');
     await ensureFolders(cfg, folder);
     const storedName = `${Date.now()}_${safeSegment(input.name)}`;
     const path = `${folder}/${storedName}`;
