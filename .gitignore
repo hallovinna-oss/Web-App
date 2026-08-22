@@ -1,13 +1,6 @@
-# Local Netlify folder
-.netlify
-
-# Node modules
 node_modules/
+.npm-cache/
+.android-tools/
+android/
+*.log
 
-# Local build / publish artifacts
-publish/
-
-# OS and editor
-.DS_Store
-Thumbs.db
-.vscode/
