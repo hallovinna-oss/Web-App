@@ -26,6 +26,8 @@ const FirebaseBackend = {
   renderQueued: false,
   syncTimer: null,
   fileUrlCache: new Map(),
+  attendanceSnapshotReady: false,
+  attendanceMigrationStarted: false,
 
   scheduleSync(appState) {
     if (!auth.currentUser) return;
@@ -222,21 +224,25 @@ const FirebaseBackend = {
     const writes = [];
     const today = state.attendanceDate || new Date().toISOString().slice(0, 10);
 
-    Object.values(state.attendance || {}).forEach(record => {
-      if (!record || !record.studentId) return;
-      const validStatus = this.normalizeAttendanceStatus(record.status);
-      if (!validStatus) return;
-      const clean = this.sanitizeFirestoreValue({ ...record });
-      const attendanceDoc = {
-        ...clean,
-        status: validStatus,
-        campusId: clean.campusId || null,
-        campusName: clean.campusName || null,
-        date: today,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      writes.push(db.collection('attendance').doc(`${today}_${record.studentId}`).set(attendanceDoc, { merge: true }));
-    });
+    // Never let stale browser cache overwrite Firestore during application boot.
+    // Explicit check-in/edit actions use writeAttendanceRecord directly.
+    if (this.attendanceSnapshotReady) {
+      Object.values(state.attendance || {}).forEach(record => {
+        if (!record || !record.studentId) return;
+        const validStatus = this.normalizeAttendanceStatus(record.status);
+        if (!validStatus) return;
+        const clean = this.sanitizeFirestoreValue({ ...record });
+        const attendanceDoc = {
+          ...clean,
+          status: validStatus,
+          campusId: clean.campusId || null,
+          campusName: clean.campusName || null,
+          date: today,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        writes.push(db.collection('attendance').doc(`${today}_${record.studentId}`).set(attendanceDoc, { merge: true }));
+      });
+    }
 
     (state.leaveRequests || []).forEach(item => {
       const clean = this.sanitizeFirestoreValue({ ...item });
@@ -302,8 +308,46 @@ const FirebaseBackend = {
     return db.collection('assignmentSubmissions').doc(`${assignmentId}_${submission.studentId}`).set(clean, { merge: true });
   },
 
+  async migrateOfficialAttendanceOnce(appState) {
+    if (this.attendanceMigrationStarted || appState.currentUser?.role !== 'guru') return;
+    this.attendanceMigrationStarted = true;
+    const markerRef = db.collection('settings').doc('attendanceMigrationJuly2026');
+    const marker = await markerRef.get();
+    if (marker.exists) return;
+
+    const response = await fetch('/fixed_attendance_july_2026.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Data absensi resmi tidak dapat dimuat untuk migrasi.');
+    const fixed = await response.json();
+    const batch = db.batch();
+    let created = 0;
+    Object.entries(fixed).forEach(([studentId, dates]) => {
+      Object.entries(dates || {}).forEach(([date, rawStatus]) => {
+        if (appState.historicalAttendance?.[studentId]?.[date]) return;
+        const status = this.normalizeAttendanceStatus(rawStatus);
+        if (!status) return;
+        const student = appState.students.find(item => item.id === studentId);
+        batch.set(db.collection('attendance').doc(`${date}_${studentId}`), {
+          studentId,
+          studentNis: student?.nis || null,
+          studentName: student?.name || null,
+          date,
+          status,
+          source: 'official_excel_migration',
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        created += 1;
+      });
+    });
+    batch.set(markerRef, {
+      completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      recordsCreated: created
+    }, { merge: true });
+    await batch.commit();
+  },
+
   startListeners(appState) {
     this.stopListeners();
+    this.attendanceSnapshotReady = false;
     const today = appState.attendanceDate || new Date().toISOString().slice(0, 10);
     const startDate = ACADEMIC_ATTENDANCE_START;
     const endDate = new Date().toISOString().slice(0, 10);
@@ -326,11 +370,16 @@ const FirebaseBackend = {
           }
         });
         appState.historicalAttendance = historical;
+        appState.monthlyAttendance = JSON.parse(JSON.stringify(historical));
         // Firestore is authoritative while authenticated. Do not preserve stale
         // local records that are absent from the cloud snapshot.
         appState.attendance = dayAttendance;
         localStorage.setItem('dkvf_attendance', JSON.stringify(dayAttendance));
         localStorage.setItem('dkvf_historical_attendance', JSON.stringify(historical));
+        localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(appState.monthlyAttendance));
+        const firstCloudSnapshot = !this.attendanceSnapshotReady;
+        this.attendanceSnapshotReady = true;
+        if (firstCloudSnapshot) this.migrateOfficialAttendanceOnce(appState).catch(console.error);
         this.requestRender(appState);
       }, console.error));
 

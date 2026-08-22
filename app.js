@@ -163,7 +163,6 @@ const AppState = {
       window.addEventListener('pagehide', () => this.saveState());
       this.restorePersistedSessionIfAvailable();
       this.render();
-      try { this.loadFixedAttendanceFile(); } catch(e) {}
       this.initUploadsDir();
     } catch (e) {
       console.error("Critical init error:", e);
@@ -655,6 +654,7 @@ const AppState = {
       const date = new Date(year, month, d);
       const status = this.attendanceStatusForDate(studentId, date);
       if (!this.isSchoolDayDate(date)) continue;
+      if (!['tepat_waktu', 'sakit', 'izin', 'alpha'].includes(status)) continue;
       schoolDays += 1;
       if (status === 'tepat_waktu') present += 1;
       else if (status === 'sakit') sick += 1;
