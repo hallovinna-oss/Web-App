@@ -974,6 +974,7 @@ const AppState = {
       FirebaseBackend.startListeners(this);
       this.logAudit(`${this.currentUser.name} berhasil masuk melalui Firebase`);
       this.render();
+      if (window.MiphaAndroidNotifications) window.MiphaAndroidNotifications.sync(this);
       return { success: true };
     } catch (error) {
       console.error('Firebase login error:', error);
@@ -995,6 +996,7 @@ const AppState = {
     this.clearPersistedCurrentUser();
     sessionStorage.clear();
     this.render();
+    if (window.MiphaAndroidNotifications) window.MiphaAndroidNotifications.sync(this);
   },
 
   performCheckout() {
@@ -3642,6 +3644,8 @@ const AppState = {
     return raw;
   }
 };
+
+window.AppState = AppState;
 
 function startApp() {
   try {
