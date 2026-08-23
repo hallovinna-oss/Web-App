@@ -58,6 +58,25 @@ const FirebaseBackend = {
     return result;
   },
 
+  async syncMoncerAttendance(nis, gps) {
+    if (!auth.currentUser) throw new Error('Login diperlukan untuk mengirim presensi ke Moncer.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/.netlify/functions/moncer-attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        nis: String(nis || ''),
+        method: gps.checkinMethod === 'nis' || gps.checkinMethod === 'pin' ? 'nis' : 'gps',
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        gpsAccuracy: gps.gpsAccuracy
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success !== true) throw new Error(result.error || 'Moncer menolak presensi.');
+    return result;
+  },
+
   async downloadFile(path, name) {
     if (!auth.currentUser) throw new Error('Login diperlukan untuk membuka file.');
     const token = await auth.currentUser.getIdToken();
