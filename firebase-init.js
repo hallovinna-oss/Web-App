@@ -122,12 +122,16 @@ const FirebaseBackend = {
   },
 
   requestRender(appState) {
-    if (this.renderQueued) return;
-    this.renderQueued = true;
-    queueMicrotask(() => {
-      this.renderQueued = false;
-      appState.render();
-    });
+    const now = Date.now();
+    if (!this.renderBatchStartedAt) this.renderBatchStartedAt = now;
+    if (this.renderTimer) clearTimeout(this.renderTimer);
+    const batchAge = now - this.renderBatchStartedAt;
+    const delay = batchAge >= 500 ? 0 : 160;
+    this.renderTimer = setTimeout(() => {
+      this.renderTimer = null;
+      this.renderBatchStartedAt = 0;
+      appState.render({ silent: true, preserveUi: true });
+    }, delay);
   },
 
   normalizeAttendanceStatus(status) {

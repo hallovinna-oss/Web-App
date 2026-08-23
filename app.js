@@ -1255,9 +1255,15 @@ const AppState = {
     return '';
   },
 
-  render() {
+  render(options = {}) {
     const appEl = document.getElementById('app-container');
     if (!appEl) return;
+    const preserveUi = options.preserveUi === true;
+    const previousScrollY = preserveUi ? window.scrollY : 0;
+    const activeElement = preserveUi ? document.activeElement : null;
+    const activeElementId = activeElement && activeElement.id ? activeElement.id : null;
+    const selectionStart = activeElement && typeof activeElement.selectionStart === 'number' ? activeElement.selectionStart : null;
+    const selectionEnd = activeElement && typeof activeElement.selectionEnd === 'number' ? activeElement.selectionEnd : null;
     if (!this.currentUser) {
       appEl.innerHTML = this.renderLoginView();
       this.setupLoginEvents();
@@ -1266,7 +1272,7 @@ const AppState = {
 
     appEl.innerHTML = `
       ${this.renderHeader()}
-      <main class="main-content fade-in">
+      <main class="main-content${options.silent ? '' : ' fade-in'}">
         ${this.renderActiveView()}
       </main>
       ${this.renderBottomNav()}
@@ -1276,6 +1282,18 @@ const AppState = {
       ${localStorage.getItem('mipha_debug') === '1' ? this.renderDebugPanel() : ''}
     `;
     this.setupViewEvents();
+    if (preserveUi) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' });
+        if (!activeElementId) return;
+        const restored = document.getElementById(activeElementId);
+        if (!restored) return;
+        restored.focus({ preventScroll: true });
+        if (selectionStart !== null && typeof restored.setSelectionRange === 'function') {
+          restored.setSelectionRange(selectionStart, selectionEnd);
+        }
+      });
+    }
   },
 
   renderDebugPanel() {
