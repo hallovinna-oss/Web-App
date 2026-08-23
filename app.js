@@ -801,13 +801,19 @@ const AppState = {
     return attendanceMap;
   },
 
-  performCheckin(method, customDistance = null, pinInput = null, campus = null) {
+  async performCheckin(method, customDistance = null, pinInput = null, campus = null) {
     if (!this.currentUser || this.currentUser.role !== 'siswa') return;
     const studentId = this.currentUser.id;
     const now = new Date();
 
-    if (method === 'pin' && pinInput !== SCHOOL_CONFIG.backupPin) {
-      return { success: false, message: 'PIN Backup Kelas Salah. Hubungi wali kelas.' };
+    const existing = this.attendance[studentId];
+    if (existing?.checkinTime && existing?.status && existing.status !== 'belum_checkin') {
+      return { success: false, message: 'Anda sudah melakukan check-in hari ini. Presensi tidak dikirim ulang ke Moncer.' };
+    }
+
+    if ((method === 'pin' || method === 'nis') && String(pinInput || '').trim() !== String(this.currentUser.nis || '').trim()) {
+      this.logAudit(`Verifikasi NIS ditolak untuk akun ${this.currentUser.name}: NIS tidak sesuai`);
+      return { success: false, message: 'NIS tidak sesuai dengan akun siswa yang sedang login.' };
     }
 
     const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
@@ -827,8 +833,8 @@ const AppState = {
     const gpsAccuracy = campus && campus._gps && typeof campus._gps.accuracy === 'number' ? campus._gps.accuracy : null;
     const gpsTimestamp = campus && campus._gps && campus._gps.timestamp ? new Date(campus._gps.timestamp).toISOString() : new Date().toISOString();
 
-    this.attendance[studentId] = {
-      ...this.attendance[studentId],
+    const attendanceRecord = {
+      ...existing,
       status,
       checkinTime: timeString,
       checkinMethod: method,
@@ -840,11 +846,46 @@ const AppState = {
       gpsAccuracy,
       gpsTimestamp
     };
+
+    if (method === 'gps' || method === 'nis' || method === 'pin') {
+      attendanceRecord.moncerSync = 'pending';
+      attendanceRecord.moncerMessage = 'Menunggu sinkronisasi Moncer.';
+    }
+
+    this.attendance[studentId] = attendanceRecord;
     this.logAudit(`Check-in Sekolah oleh ${this.currentUser.name} (${status.toUpperCase()}, ${distance}m)${campus && campus.name ? ' @ ' + campus.name : ''}`);
     this.saveState();
+    const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
     if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
-      const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
-      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
+      try {
+        await FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]);
+        attendanceRecord.cloudSync = 'success';
+      } catch (error) {
+        attendanceRecord.cloudSync = 'failed';
+        attendanceRecord.cloudSyncMessage = error.message || 'Sinkronisasi database gagal.';
+        console.warn('Cloud sync failed:', error);
+      }
+    } else {
+      attendanceRecord.cloudSync = 'pending';
+      attendanceRecord.cloudSyncMessage = 'Menunggu login Firebase.';
+    }
+
+    if ((method === 'gps' || method === 'nis' || method === 'pin') && window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+      try {
+        const moncerResult = await FirebaseBackend.syncMoncerAttendance(this.currentUser.nis, attendanceRecord);
+        attendanceRecord.moncerSync = 'success';
+        attendanceRecord.moncerSyncedAt = new Date().toISOString();
+        attendanceRecord.moncerStatus = moncerResult.data?.status || null;
+        attendanceRecord.moncerMessage = moncerResult.message || null;
+      } catch (error) {
+        attendanceRecord.moncerSync = 'failed';
+        attendanceRecord.moncerMessage = error.message || 'Sinkronisasi Moncer gagal.';
+      }
+
+      this.attendance[studentId] = attendanceRecord;
+      this.saveState();
+      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, attendanceRecord)
+        .catch(error => console.warn('Cloud sync status update failed:', error));
     }
     return {
       success: true,
@@ -856,7 +897,9 @@ const AppState = {
       latitude: this.attendance[studentId].latitude || null,
       longitude: this.attendance[studentId].longitude || null,
       gpsAccuracy: this.attendance[studentId].gpsAccuracy || null,
-      gpsTimestamp: this.attendance[studentId].gpsTimestamp || null
+      gpsTimestamp: this.attendance[studentId].gpsTimestamp || null,
+      moncerSync: attendanceRecord.moncerSync || null,
+      moncerMessage: attendanceRecord.moncerMessage || null
     };
   },
 
@@ -2197,11 +2240,12 @@ const AppState = {
         </button>
 
         <div style="margin-top: 1.5rem; border-top: 1px dashed var(--border-light); padding-top: 1.25rem;">
-          <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.5rem;">Alternative: PIN Backup Kelas (7575)</div>
+          <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.5rem;">Alternatif: Verifikasi NIS Pribadi</div>
+          <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.6rem;">NIS harus sesuai dengan akun siswa yang sedang login dan tidak dapat dipakai untuk siswa lain.</div>
           <div class="form-group">
             <div style="display: flex; gap: 0.5rem;">
-              <input type="text" class="form-input" id="input-pin-backup" placeholder="PIN Kelas (7575)">
-              <button class="btn btn-primary" id="btn-do-pin-checkin">Verifikasi PIN</button>
+              <input type="text" inputmode="numeric" autocomplete="off" class="form-input" id="input-pin-backup" placeholder="Masukkan NIS pribadi">
+              <button class="btn btn-primary" id="btn-do-pin-checkin">Verifikasi NIS</button>
             </div>
           </div>
         </div>
@@ -2772,11 +2816,11 @@ const AppState = {
 
     const btnPin = document.getElementById('btn-do-pin-checkin');
     if (btnPin) {
-      btnPin.onclick = () => {
+      btnPin.onclick = async () => {
         const pinInput = document.getElementById('input-pin-backup').value;
-        const res = this.performCheckin('pin', 0, pinInput);
+        const res = await this.performCheckin('nis', 0, pinInput);
         if (res && res.success) {
-          alert(`✅ Check-in PIN Berhasil! Jam: ${res.time}`);
+          alert(`✅ Check-in NIS Berhasil! Jam: ${res.time}`);
           this.switchView('dashboard');
         } else if (res && res.message) {
           alert(res.message);
