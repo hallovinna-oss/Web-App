@@ -73,7 +73,7 @@ const FirebaseBackend = {
       })
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success !== true) throw new Error(result.error || 'Moncer menolak presensi.');
+    if (!response.ok || result.success !== true || result.verified !== true) throw new Error(result.error || 'Presensi belum terverifikasi di Moncer.');
     return result;
   },
 
@@ -365,6 +365,13 @@ const FirebaseBackend = {
     return db.collection('assignmentSubmissions').doc(`${assignmentId}_${submission.studentId}`).set(clean, { merge: true });
   },
 
+  async writeGradeReport(report) {
+    if (!auth.currentUser) throw new Error('Login diperlukan.');
+    if (!report?.id || !report.studentId || !report.subject || !report.semester) throw new Error('Data nilai belum lengkap.');
+    const clean = this.sanitizeFirestoreValue({ ...report, updatedBy: auth.currentUser.uid, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    return db.collection('gradeReports').doc(report.id).set(clean, { merge: true });
+  },
+
   async migrateOfficialAttendanceOnce(appState) {
     if (this.attendanceMigrationStarted || appState.currentUser?.role !== 'guru') return;
     this.attendanceMigrationStarted = true;
@@ -482,6 +489,15 @@ const FirebaseBackend = {
       });
       this.requestRender(appState);
     }, console.error));
+
+    const gradeQuery = appState.currentUser?.role === 'guru' ? db.collection('gradeReports') : db.collection('gradeReports').where('studentId', '==', appState.currentUser?.id || '__none__');
+    this.unsubscribers.push(gradeQuery.onSnapshot(snapshot => {
+      const reports = {};
+      snapshot.docs.forEach(doc => { reports[doc.id] = { id: doc.id, ...doc.data() }; });
+      appState.gradeReports = reports;
+      localStorage.setItem('mipha_grade_reports', JSON.stringify(reports));
+      this.requestRender(appState);
+    }, error => console.warn('Grade listener failed:', error.message)));
 
     this.unsubscribers.push(db.collection('homeVisits').onSnapshot(snapshot => {
       appState.homeVisits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));

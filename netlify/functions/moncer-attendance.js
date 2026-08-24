@@ -15,6 +15,17 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
   return Math.round(earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+function resolveAttendanceCode(lookupResult, nis) {
+  const rows = Array.isArray(lookupResult?.data) ? lookupResult.data : [];
+  const matched = rows.find(item =>
+    String(item.nisn || item.nis || '').trim() === String(nis).trim()
+    || String(item.kode_absen || item.qr_codena || '').trim() === String(nis).trim()
+  );
+  if (!matched) return null;
+  const code = String(matched.kode_absen || matched.qr_codena || '').trim();
+  return code ? { code, student: matched } : null;
+}
+
 exports.handler = async event => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
@@ -51,6 +62,19 @@ exports.handler = async event => {
     const baseUrl = String(process.env.MONCER_API_BASE_URL || 'https://absen.mipha.sch.id/api.php').trim();
     if (!apiKey) return json(503, { error: 'Integrasi Moncer belum dikonfigurasi.' });
 
+    const apiHeaders = { 'X-API-Key': apiKey };
+    const lookupTarget = new URL(baseUrl);
+    lookupTarget.searchParams.set('action', 'cari');
+    lookupTarget.searchParams.set('q', nis);
+    lookupTarget.searchParams.set('limit', '20');
+    const lookupResponse = await fetch(lookupTarget, { headers: apiHeaders });
+    const lookupResult = await lookupResponse.json().catch(() => ({}));
+    const resolvedStudent = resolveAttendanceCode(lookupResult, nis);
+    if (!resolvedStudent) {
+      return json(404, { error: `NIS ${nis} tidak ditemukan pada data Moncer. Hubungi admin untuk memeriksa kode absennya.` });
+    }
+    const attendanceCode = resolvedStudent.code;
+
     const target = new URL(baseUrl);
     target.searchParams.set('action', 'absen');
     const controller = new AbortController();
@@ -59,8 +83,8 @@ exports.handler = async event => {
     try {
       response = await fetch(target, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'X-API-Key': apiKey },
-        body: JSON.stringify(method === 'gps' ? { kode: nis, latitude, longitude } : { kode: nis }),
+        headers: { 'content-type': 'application/json', ...apiHeaders },
+        body: JSON.stringify(method === 'gps' ? { kode: attendanceCode, latitude, longitude } : { kode: attendanceCode }),
         signal: controller.signal
       });
     } finally {
@@ -73,16 +97,28 @@ exports.handler = async event => {
       return json(response.status >= 400 && response.status < 500 ? response.status : 502, { error: message });
     }
 
+    const verifyTarget = new URL(baseUrl);
+    verifyTarget.searchParams.set('action', 'cek_presensi');
+    verifyTarget.searchParams.set('uid', attendanceCode);
+    verifyTarget.searchParams.set('tanggal', new Date().toISOString().slice(0, 10));
+    const verifyResponse = await fetch(verifyTarget, { headers: apiHeaders });
+    const verifyResult = await verifyResponse.json().catch(() => ({}));
+    if (!verifyResponse.ok || verifyResult.success !== true || !verifyResult.data?.jam_datang) {
+      return json(502, { error: 'Moncer merespons, tetapi presensi belum terverifikasi pada rekapan Moncer.' });
+    }
+
     return json(200, {
       success: true,
-      message: result.message || 'Presensi berhasil dikirim ke Moncer.',
+      verified: true,
+      message: 'Presensi berhasil dikirim dan diverifikasi pada Moncer.',
       data: {
-        kode_absen: result.data?.kode_absen || nis,
-        tanggal: result.data?.tanggal || null,
-        jam_datang: result.data?.jam_datang || null,
-        jam_pulang: result.data?.jam_pulang || null,
-        keterangan: result.data?.keterangan || null,
-        status: result.data?.status || null,
+        kode_absen: verifyResult.data.kode_absen || attendanceCode,
+        nisn: verifyResult.data.nisn || nis,
+        tanggal: verifyResult.data.tanggal || null,
+        jam_datang: verifyResult.data.jam_datang || null,
+        jam_pulang: verifyResult.data.jam_pulang || null,
+        keterangan: verifyResult.data.keterangan || null,
+        status: result.data?.status || verifyResult.data.status || null,
         method,
         campusId: nearest?.campus.id || null,
         distanceMeters: nearest?.distance || null
@@ -94,3 +130,5 @@ exports.handler = async event => {
     return json(error.statusCode || 500, { error: message });
   }
 };
+
+exports._test = { distanceMeters, resolveAttendanceCode };

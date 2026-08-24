@@ -699,3 +699,23 @@ body {
 #hv-photo-preview { padding-top:.25rem; }
 .mipha-splash { transition: opacity .7s ease, visibility .7s ease; }
 .splash-content { animation-duration:1.25s; }
+/* Grade report workspace */
+.grade-hero { margin-bottom: 1rem; }
+.grade-hero h2 { font-size: 1.35rem; font-weight: 800; margin: .25rem 0; }
+.grade-toolbar { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(240px, 1.3fr) minmax(140px, .5fr); gap: 1rem; align-items: end; }
+.grade-toolbar .form-group { margin-bottom: 0; }
+.grade-progress { display: flex; flex-direction: column; padding: .65rem .8rem; border-radius: var(--radius-sm); background: var(--primary-soft); color: var(--primary-dark); }
+.grade-progress b { font-size: 1.15rem; }
+.grade-progress span, .grade-help { color: var(--text-muted); font-size: .78rem; }
+.grade-table input { width: 76px; min-width: 68px; padding: .45rem; text-align: center; }
+.grade-table textarea { min-width: 220px; padding: .45rem; resize: vertical; }
+.grade-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: 1rem; }
+.grade-summary-grid .card { display: flex; flex-direction: column; text-align: center; padding: 1rem; }
+.grade-summary-grid b { color: var(--primary-dark); font-size: 1.5rem; }
+.grade-summary-grid span { color: var(--text-muted); font-size: .78rem; }
+.grade-achievement { min-width: 220px; white-space: normal; line-height: 1.45; }
+.empty-state { padding: 2rem !important; text-align: center; color: var(--text-muted); }
+@media (max-width: 720px) { .grade-toolbar { grid-template-columns: 1fr; } .grade-summary-grid { grid-template-columns: repeat(3, 1fr); gap: .4rem; } .grade-summary-grid .card { padding: .7rem .35rem; } .grade-table textarea { min-width: 180px; } }
+.moncer-sync-status { margin-top: .75rem; padding: .7rem .8rem; border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: .15rem; font-size: .78rem; background: #fff7ed; color: #9a3412; }
+.moncer-sync-status.success { background: #ecfdf5; color: #047857; }
+.moncer-sync-status.failed { background: #fef2f2; color: #b91c1c; }
