@@ -15,6 +15,17 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
   return Math.round(earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+function resolveAttendanceCode(lookupResult, nis) {
+  const rows = Array.isArray(lookupResult?.data) ? lookupResult.data : [];
+  const matched = rows.find(item =>
+    String(item.nisn || item.nis || '').trim() === String(nis).trim()
+    || String(item.kode_absen || item.qr_codena || '').trim() === String(nis).trim()
+  );
+  if (!matched) return null;
+  const code = String(matched.kode_absen || matched.qr_codena || '').trim();
+  return code ? { code, student: matched } : null;
+}
+
 exports.handler = async event => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
@@ -58,16 +69,11 @@ exports.handler = async event => {
     lookupTarget.searchParams.set('limit', '20');
     const lookupResponse = await fetch(lookupTarget, { headers: apiHeaders });
     const lookupResult = await lookupResponse.json().catch(() => ({}));
-    const lookupRows = Array.isArray(lookupResult.data) ? lookupResult.data : [];
-    const matchedStudent = lookupRows.find(item =>
-      String(item.nisn || item.nis || '').trim() === nis
-      || String(item.kode_absen || item.qr_codena || '').trim() === nis
-    );
-    if (!matchedStudent) {
+    const resolvedStudent = resolveAttendanceCode(lookupResult, nis);
+    if (!resolvedStudent) {
       return json(404, { error: `NIS ${nis} tidak ditemukan pada data Moncer. Hubungi admin untuk memeriksa kode absennya.` });
     }
-    const attendanceCode = String(matchedStudent.kode_absen || matchedStudent.qr_codena || '').trim();
-    if (!attendanceCode) return json(422, { error: `Kode absen Moncer untuk NIS ${nis} belum tersedia.` });
+    const attendanceCode = resolvedStudent.code;
 
     const target = new URL(baseUrl);
     target.searchParams.set('action', 'absen');
@@ -124,3 +130,5 @@ exports.handler = async event => {
     return json(error.statusCode || 500, { error: message });
   }
 };
+
+exports._test = { distanceMeters, resolveAttendanceCode };
