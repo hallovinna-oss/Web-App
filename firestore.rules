@@ -46,6 +46,10 @@ service cloud.firestore {
                             && request.resource.data.studentId == me().data.id;
       allow delete: if isTeacher();
     }
+    match /gradeReports/{id} {
+      allow read: if isTeacher() || (signedIn() && resource.data.studentId == me().data.id);
+      allow create, update, delete: if isTeacher();
+    }
     match /homeVisits/{id} { allow read, write: if isTeacher(); }
     match /settings/{id} { allow read: if signedIn(); allow write: if isTeacher(); }
   }

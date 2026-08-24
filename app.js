@@ -146,6 +146,9 @@ const AppState = {
   teacherProfile: {},
   homeVisits: [],
   assignments: [],
+  gradeReports: {},
+  selectedGradeSubject: 'Dasar Animasi',
+  selectedGradeSemester: '2026/2027 - Ganjil',
   visitEditorOpen: false,
   editingVisitId: null,
   activeAssignmentSubmissionId: null,
@@ -421,6 +424,7 @@ const AppState = {
       { id:'as_1', title:'Poster Kampanye Sekolah', subject:'Dasar Animasi', dueDate:'2026-08-05', description:'Buat poster digital bertema disiplin sekolah.', submitted:28, total:36 },
       { id:'as_2', title:'Latihan Komposisi Foto', subject:'DKV / Fotografi', dueDate:'2026-08-08', description:'Kumpulkan tiga foto dengan rule of thirds.', submitted:19, total:36 }
     ]);
+    this.gradeReports = this.safeJSONParse('mipha_grade_reports', {});
 
     this.teacherCodes = {
       '14': 'Prabowo Hadi Saputro, S.Kom.',
@@ -518,6 +522,7 @@ const AppState = {
     localStorage.setItem('mipha_teacher_profile', JSON.stringify(this.teacherProfile));
     localStorage.setItem('mipha_home_visits', JSON.stringify(this.homeVisits));
     localStorage.setItem('mipha_assignments', JSON.stringify(this.assignments));
+    localStorage.setItem('mipha_grade_reports', JSON.stringify(this.gradeReports));
     localStorage.setItem('mipha_attendance_date', this.attendanceDate || new Date().toISOString().split('T')[0]);
     if (this.currentUser) {
       this.persistCurrentUser();
@@ -1163,16 +1168,46 @@ const AppState = {
     }
   },
 
-  saveStudentGrade(studentId, subject, formatif, sumatif, sikap) {
+  getGradeSubjects() {
+    const ignored = /istirahat|upacara|perwalian/i;
+    const subjects = [];
+    (this.timetables || []).forEach(day => (day.subjects || []).forEach(item => {
+      const name = String(item.name || '').trim();
+      if (name && !ignored.test(name) && !subjects.includes(name)) subjects.push(name);
+    }));
+    return subjects.length ? subjects : ['Dasar Animasi', 'DKV / Fotografi', 'Informatika & AI'];
+  },
+
+  gradeReportKey(studentId, subject, semester = this.selectedGradeSemester) {
+    const slug = String(subject || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const term = String(semester || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return `${studentId}_${term}_${slug}`;
+  },
+
+  getStudentGradeReports(studentId) {
+    return Object.values(this.gradeReports || {}).filter(item => item.studentId === studentId && item.semester === this.selectedGradeSemester).sort((a, b) => String(a.subject).localeCompare(String(b.subject), 'id'));
+  },
+
+  calculateFinalGrade(formatif, sumatif, praktik) {
+    return Math.round((Number(formatif) * 0.3) + (Number(sumatif) * 0.3) + (Number(praktik) * 0.4));
+  },
+
+  async saveStudentGrade(studentId, subject, formatif, sumatif, praktik, sikap, capaian) {
     const student = this.students.find(s => s.id === studentId);
-    if (student) {
-      if (!student.grades) student.grades = {};
-      student.grades[subject] = { formatif: Number(formatif), sumatif: Number(sumatif), sikap: sikap };
-      this.logAudit(`Penilaian mata pelajaran ${subject} untuk ${student.name} diperbarui`);
+    if (!student || this.currentUser?.role !== 'guru') return;
+    const values = [formatif, sumatif, praktik].map(Number);
+    if (values.some(value => !Number.isFinite(value) || value < 0 || value > 100)) return alert('Nilai harus berupa angka 0–100.');
+    const id = this.gradeReportKey(studentId, subject);
+    const report = { id, studentId, studentNis: student.nis, studentName: student.name, className: student.class || 'X DKV F', subject, semester: this.selectedGradeSemester, formatif: values[0], sumatif: values[1], praktik: values[2], sikap: sikap || 'B', capaian: String(capaian || '').trim(), finalGrade: this.calculateFinalGrade(...values) };
+    try {
+      if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) throw new Error('Login Firebase diperlukan.');
+      await FirebaseBackend.writeGradeReport(report);
+      this.gradeReports[id] = report;
+      this.logAudit(`Nilai ${subject} untuk ${student.name} diperbarui`);
       this.saveState();
-      alert(`✅ Nilai ${subject} untuk ${student.name} berhasil diperbarui!`);
-      this.render();
-    }
+      alert(`✅ Nilai ${subject} untuk ${student.name} tersimpan ke cloud.`);
+      this.render({ silent: true, preserveUi: true });
+    } catch (error) { console.error(error); alert('Gagal menyimpan nilai: ' + error.message); }
   },
 
   async openAttachment(leaveId) {
@@ -1348,10 +1383,11 @@ const AppState = {
       { view: 'my_grades', icon: '📊', label: 'Nilai Saya' },
       { view: 'student_profile', icon: '👤', label: 'Profil' }
     ] : [
-      { view: 'dashboard', icon: '🏠', label: 'Home' },
+      { view: 'dashboard', icon: '🏠', label: 'Beranda' },
+      { view: 'grades', icon: '📊', label: 'Nilai' },
       { view: 'home_visits', icon: '🏡', label: 'Home Visit' },
-      { view: 'assignments', icon: '📚', label: 'Assignments' },
-      { view: 'students', icon: '👥', label: 'Students' },
+      { view: 'assignments', icon: '📚', label: 'Tugas' },
+      { view: 'students', icon: '👥', label: 'Siswa' },
       { view: 'ai_assistant', icon: '🤖', label: 'AI' },
       { view: 'teacher_profile', icon: '👤', label: 'Profile' }
     ];
@@ -1667,6 +1703,7 @@ const AppState = {
       </div>
 
       <div class="mipha-grid">
+        <button class="mipha-module" data-view="grades"><span>📊</span><b>Rapor Capaian</b><small>Kelola nilai semua mata pelajaran</small></button>
         <button class="mipha-module urgent" data-view="home_visits"><span>🏡</span><b>Home Visit Center</b><small>${this.homeVisits.filter(v=>v.status!=='completed').length} visits need action</small></button>
         <button class="mipha-module" data-view="assignments"><span>📚</span><b>Assignment Center</b><small>${this.assignments.reduce((n,a)=>n+(a.total-a.submitted),0)} missing submissions</small></button>
         <button class="mipha-module warning" data-view="students"><span>🚨</span><b>Student Warning</b><small>${allAtt.filter(a=>['sakit','izin','belum_checkin'].includes(a.status)).length} students flagged today</small></button>
@@ -2080,41 +2117,48 @@ const AppState = {
   },
 
   renderTeacherGradesView() {
+    const subjects = this.getGradeSubjects();
+    const subject = subjects.includes(this.selectedGradeSubject) ? this.selectedGradeSubject : subjects[0];
+    this.selectedGradeSubject = subject;
+    const completed = this.students.filter(student => this.gradeReports[this.gradeReportKey(student.id, subject)]).length;
     return `
+      <div class="welcome-banner grade-hero"><span class="banner-role">Rapor Capaian Kejuruan</span><h2>Penilaian Kelas X DKV F</h2><p>Nilai tersimpan di cloud dan otomatis tampil pada dashboard siswa.</p></div>
+      <div class="card grade-toolbar">
+        <div class="form-group"><label class="form-label">Semester</label><select id="grade-semester" class="form-select">${['2026/2027 - Ganjil','2026/2027 - Genap'].map(item => `<option ${item === this.selectedGradeSemester ? 'selected' : ''}>${item}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">Mata Pelajaran</label><select id="grade-subject" class="form-select">${subjects.map(item => `<option ${item === subject ? 'selected' : ''}>${item}</option>`).join('')}</select></div>
+        <div class="grade-progress"><b>${completed}/${this.students.length}</b><span>Siswa sudah dinilai</span></div>
+      </div>
       <div class="card">
-        <div class="card-title">📝 Penilaian Akademik & Modul DKV</div>
+        <div class="card-title">📝 Input Nilai — ${subject}</div>
+        <p class="grade-help">Nilai akhir: 30% formatif + 30% sumatif + 40% praktik/proyek. KKM 75.</p>
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
-                <th>No</th><th>NIS</th><th>Nama Siswa</th><th>Mata Pelajaran</th><th>Formatif</th><th>Sumatif</th><th>Sikap</th><th>Aksi</th>
+                <th>No</th><th>NIS</th><th>Nama Siswa</th><th>Formatif</th><th>Sumatif</th><th>Praktik</th><th>Sikap</th><th>Capaian Kompetensi</th><th>Nilai Akhir</th><th>Aksi</th>
               </tr>
             </thead>
             <tbody>
               ${this.students.map((st, idx) => {
-                const g = st.grades ? st.grades['Dasar Animasi'] || { formatif: 85, sumatif: 88, sikap: 'A' } : { formatif: 85, sumatif: 88, sikap: 'A' };
+                const g = this.gradeReports[this.gradeReportKey(st.id, subject)] || {};
+                const finalGrade = [g.formatif, g.sumatif, g.praktik].every(Number.isFinite) ? this.calculateFinalGrade(g.formatif, g.sumatif, g.praktik) : null;
                 return `
                   <tr>
                     <td>${idx + 1}</td>
                     <td><b>${st.nis}</b></td>
                     <td><b>${st.name}</b></td>
-                    <td>
-                      <select class="form-select select-grade-subject-${st.id}" style="padding: 0.3rem; font-size: 0.8rem;">
-                        <option value="Dasar Animasi">Dasar Animasi</option>
-                        <option value="DKV / Fotografi">DKV / Fotografi</option>
-                        <option value="Informatika & AI">Informatika & AI</option>
-                        <option value="Bahasa Inggris">Bahasa Inggris</option>
-                        <option value="Matematika">Matematika</option>
-                      </select>
-                    </td>
-                    <td><input type="number" class="form-input input-formatif-${st.id}" value="${g.formatif}" style="width: 65px; padding: 0.3rem; text-align: center;"></td>
-                    <td><input type="number" class="form-input input-sumatif-${st.id}" value="${g.sumatif}" style="width: 65px; padding: 0.3rem; text-align: center;"></td>
+                    <td><input type="number" min="0" max="100" class="form-input input-formatif-${st.id}" value="${g.formatif ?? ''}" placeholder="0-100"></td>
+                    <td><input type="number" min="0" max="100" class="form-input input-sumatif-${st.id}" value="${g.sumatif ?? ''}" placeholder="0-100"></td>
+                    <td><input type="number" min="0" max="100" class="form-input input-praktik-${st.id}" value="${g.praktik ?? ''}" placeholder="0-100"></td>
                     <td>
                       <select class="form-select select-sikap-${st.id}" style="padding: 0.3rem; font-size: 0.8rem;">
                         <option value="A" ${g.sikap === 'A' ? 'selected' : ''}>A</option>
                         <option value="B" ${g.sikap === 'B' ? 'selected' : ''}>B</option>
+                        <option value="C" ${g.sikap === 'C' ? 'selected' : ''}>C</option>
                       </select>
                     </td>
+                    <td><textarea class="form-input input-capaian-${st.id}" rows="2" placeholder="Mampu membuat komposisi visual...">${g.capaian || ''}</textarea></td>
+                    <td><span class="badge ${finalGrade === null ? 'badge-info' : finalGrade >= 75 ? 'badge-success' : 'badge-danger'}">${finalGrade ?? 'Belum'}</span></td>
                     <td>
                       <button class="btn btn-primary btn-save-student-grade" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" data-student-id="${st.id}">💾 Simpan</button>
                     </td>
@@ -2130,29 +2174,31 @@ const AppState = {
 
   renderStudentMyGradesView() {
     const student = this.currentUser;
-    const grades = student.grades || {};
+    const grades = this.getStudentGradeReports(student.id);
+    const average = grades.length ? Math.round(grades.reduce((sum, item) => sum + Number(item.finalGrade || 0), 0) / grades.length) : 0;
     return `
+      <div class="welcome-banner grade-hero"><span class="banner-role">Rapor Capaian</span><h2>Nilai Saya</h2><p>${this.selectedGradeSemester} • ${student.name}</p></div>
+      <div class="grade-summary-grid"><div class="card"><b>${grades.length}</b><span>Mapel dinilai</span></div><div class="card"><b>${grades.length ? average : '-'}</b><span>Rata-rata</span></div><div class="card"><b>${grades.filter(g => Number(g.finalGrade) >= 75).length}</b><span>Tuntas</span></div></div>
       <div class="card">
-        <div class="card-title">📊 Rekap Nilai Akademik Saya</div>
+        <div class="card-title">📊 Rekap Nilai Akademik & Kejuruan</div>
         <div class="table-responsive">
           <table class="data-table">
             <thead>
-              <tr><th>Mata Pelajaran</th><th>Formatif</th><th>Sumatif</th><th>Sikap</th><th>Status</th></tr>
+              <tr><th>Mata Pelajaran</th><th>Formatif</th><th>Sumatif</th><th>Praktik</th><th>Sikap</th><th>Nilai Akhir</th><th>Status</th><th>Capaian</th></tr>
             </thead>
             <tbody>
-              ${Object.keys(grades).map(subj => {
-                const item = grades[subj];
-                const avg = Math.round((item.formatif + item.sumatif) / 2);
-                return `
+              ${grades.length ? grades.map(item => `
                   <tr>
-                    <td><b>${subj}</b></td>
+                    <td><b>${item.subject}</b></td>
                     <td>${item.formatif}</td>
                     <td>${item.sumatif}</td>
+                    <td>${item.praktik}</td>
                     <td><span class="badge badge-purple">${item.sikap}</span></td>
-                    <td><span class="badge badge-success">✅ Tuntas (${avg})</span></td>
+                    <td><b>${item.finalGrade}</b></td>
+                    <td><span class="badge ${Number(item.finalGrade) >= 75 ? 'badge-success' : 'badge-danger'}">${Number(item.finalGrade) >= 75 ? '✅ Tuntas' : 'Perlu bimbingan'}</span></td>
+                    <td class="grade-achievement">${item.capaian || 'Belum ada catatan capaian.'}</td>
                   </tr>
-                `;
-              }).join('')}
+                `).join('') : '<tr><td colspan="8" class="empty-state">Belum ada nilai yang diterbitkan oleh guru.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -2982,17 +3028,24 @@ const AppState = {
     }
 
     document.querySelectorAll('.btn-save-student-grade').forEach(btn => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         const studentId = btn.getAttribute('data-student-id');
-        const subjectSelect = document.querySelector(`.select-grade-subject-${studentId}`);
         const formatifInput = document.querySelector(`.input-formatif-${studentId}`);
         const sumatifInput = document.querySelector(`.input-sumatif-${studentId}`);
+        const praktikInput = document.querySelector(`.input-praktik-${studentId}`);
         const sikapSelect = document.querySelector(`.select-sikap-${studentId}`);
-        if (subjectSelect && formatifInput && sumatifInput && sikapSelect) {
-          this.saveStudentGrade(studentId, subjectSelect.value, formatifInput.value, sumatifInput.value, sikapSelect.value);
+        const capaianInput = document.querySelector(`.input-capaian-${studentId}`);
+        if (formatifInput && sumatifInput && praktikInput && sikapSelect) {
+          btn.disabled = true;
+          await this.saveStudentGrade(studentId, this.selectedGradeSubject, formatifInput.value, sumatifInput.value, praktikInput.value, sikapSelect.value, capaianInput?.value || '');
+          btn.disabled = false;
         }
       };
     });
+    const gradeSubject = document.getElementById('grade-subject');
+    if (gradeSubject) gradeSubject.onchange = () => { this.selectedGradeSubject = gradeSubject.value; this.render({ silent: true }); };
+    const gradeSemester = document.getElementById('grade-semester');
+    if (gradeSemester) gradeSemester.onchange = () => { this.selectedGradeSemester = gradeSemester.value; this.render({ silent: true }); };
 
     const btnExportCSV = document.getElementById('btn-export-csv');
     if (btnExportCSV) btnExportCSV.onclick = () => this.exportCSV();
