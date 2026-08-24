@@ -1553,6 +1553,10 @@ const AppState = {
           <div>Check-out Sekolah: <b>${att.checkoutTime || '-'}</b></div>
           <div>Sampai Rumah: <b>${att.homeConfirmed ? `✅ (${att.homeArrivalTime})` : '⏳ Belum Konfirmasi'}</b></div>
         </div>
+        ${att.checkinTime ? `<div class="moncer-sync-status ${att.moncerSync || 'pending'}">
+          <b>${att.moncerSync === 'success' ? '✅ Terverifikasi di Moncer' : att.moncerSync === 'failed' ? '⚠️ Belum masuk Moncer' : '⏳ Sinkronisasi Moncer'}</b>
+          <span>${att.moncerMessage || 'Menunggu konfirmasi dari server Moncer.'}</span>
+        </div>` : ''}
       </div>
 
       <div class="card-title" style="margin-top: 1.5rem;">⚡ Aksi Cepat Presensi</div>

@@ -73,7 +73,7 @@ const FirebaseBackend = {
       })
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success !== true) throw new Error(result.error || 'Moncer menolak presensi.');
+    if (!response.ok || result.success !== true || result.verified !== true) throw new Error(result.error || 'Presensi belum terverifikasi di Moncer.');
     return result;
   },
 

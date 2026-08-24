@@ -716,3 +716,6 @@ body {
 .grade-achievement { min-width: 220px; white-space: normal; line-height: 1.45; }
 .empty-state { padding: 2rem !important; text-align: center; color: var(--text-muted); }
 @media (max-width: 720px) { .grade-toolbar { grid-template-columns: 1fr; } .grade-summary-grid { grid-template-columns: repeat(3, 1fr); gap: .4rem; } .grade-summary-grid .card { padding: .7rem .35rem; } .grade-table textarea { min-width: 180px; } }
+.moncer-sync-status { margin-top: .75rem; padding: .7rem .8rem; border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: .15rem; font-size: .78rem; background: #fff7ed; color: #9a3412; }
+.moncer-sync-status.success { background: #ecfdf5; color: #047857; }
+.moncer-sync-status.failed { background: #fef2f2; color: #b91c1c; }
