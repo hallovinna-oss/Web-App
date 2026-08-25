@@ -1188,17 +1188,41 @@ const AppState = {
     return Object.values(this.gradeReports || {}).filter(item => item.studentId === studentId && item.semester === this.selectedGradeSemester).sort((a, b) => String(a.subject).localeCompare(String(b.subject), 'id'));
   },
 
-  calculateFinalGrade(formatif, sumatif, praktik) {
-    return Math.round((Number(formatif) * 0.3) + (Number(sumatif) * 0.3) + (Number(praktik) * 0.4));
+  getGradeEntries(report = {}) {
+    if (Array.isArray(report.entries)) return report.entries;
+    const legacy = [
+      ['formatif', 'Nilai Formatif', report.formatif, 30],
+      ['sumatif', 'Nilai Sumatif', report.sumatif, 30],
+      ['praktik', 'Praktik / Proyek', report.praktik, 40]
+    ];
+    return legacy.filter(([, , score]) => Number.isFinite(Number(score))).map(([type, title, score, weight], index) => ({ id: `legacy-${index}`, type, title, score: Number(score), weight, date: '' }));
   },
 
-  async saveStudentGrade(studentId, subject, formatif, sumatif, praktik, sikap, capaian) {
+  calculateGradeBook(entries = []) {
+    const valid = entries.filter(item => Number.isFinite(Number(item.score)) && Number(item.weight) > 0);
+    if (!valid.length) return null;
+    const totalWeight = valid.reduce((sum, item) => sum + Number(item.weight), 0);
+    return Math.round(valid.reduce((sum, item) => sum + (Number(item.score) * Number(item.weight)), 0) / totalWeight);
+  },
+
+  calculateFinalGrade(formatif, sumatif, praktik) {
+    return this.calculateGradeBook([
+      { score: formatif, weight: 30 }, { score: sumatif, weight: 30 }, { score: praktik, weight: 40 }
+    ]);
+  },
+
+  async saveStudentGrade(studentId, subject, entries, sikap, capaian) {
     const student = this.students.find(s => s.id === studentId);
     if (!student || this.currentUser?.role !== 'guru') return;
-    const values = [formatif, sumatif, praktik].map(Number);
-    if (values.some(value => !Number.isFinite(value) || value < 0 || value > 100)) return alert('Nilai harus berupa angka 0–100.');
+    const cleanEntries = (entries || []).map((item, index) => ({
+      id: item.id || `nilai-${Date.now()}-${index}`,
+      type: String(item.type || 'tugas'), title: String(item.title || '').trim(), date: String(item.date || ''),
+      score: Number(item.score), weight: Number(item.weight)
+    })).filter(item => item.title || Number.isFinite(item.score));
+    if (!cleanEntries.length) return alert('Tambahkan minimal satu komponen nilai.');
+    if (cleanEntries.some(item => !item.title || !Number.isFinite(item.score) || item.score < 0 || item.score > 100 || !Number.isFinite(item.weight) || item.weight <= 0 || item.weight > 100)) return alert('Setiap komponen harus memiliki nama, nilai 0–100, dan bobot 1–100.');
     const id = this.gradeReportKey(studentId, subject);
-    const report = { id, studentId, studentNis: student.nis, studentName: student.name, className: student.class || 'X DKV F', subject, semester: this.selectedGradeSemester, formatif: values[0], sumatif: values[1], praktik: values[2], sikap: sikap || 'B', capaian: String(capaian || '').trim(), finalGrade: this.calculateFinalGrade(...values) };
+    const report = { id, studentId, studentNis: student.nis, studentName: student.name, className: student.class || 'X DKV F', subject, semester: this.selectedGradeSemester, entries: cleanEntries, sikap: sikap || 'B', capaian: String(capaian || '').trim(), finalGrade: this.calculateGradeBook(cleanEntries) };
     try {
       if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) throw new Error('Login Firebase diperlukan.');
       await FirebaseBackend.writeGradeReport(report);
@@ -2133,40 +2157,43 @@ const AppState = {
         <div class="grade-progress"><b>${completed}/${this.students.length}</b><span>Siswa sudah dinilai</span></div>
       </div>
       <div class="card">
-        <div class="card-title">📝 Input Nilai — ${subject}</div>
-        <p class="grade-help">Nilai akhir: 30% formatif + 30% sumatif + 40% praktik/proyek. KKM 75.</p>
+        <div class="card-title">📝 Buku Nilai — ${subject}</div>
+        <p class="grade-help">Catat seluruh tugas, kuis, praktik, STS/UTS, SAS/UAS, dan remedial. Nilai akhir dihitung otomatis dari bobot semua komponen. KKM 75.</p>
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
-                <th>No</th><th>NIS</th><th>Nama Siswa</th><th>Formatif</th><th>Sumatif</th><th>Praktik</th><th>Sikap</th><th>Capaian Kompetensi</th><th>Nilai Akhir</th><th>Aksi</th>
+                <th>No</th><th>NIS</th><th>Nama Siswa</th><th>Komponen</th><th>Nilai Akhir</th><th>Status</th><th>Aksi</th>
               </tr>
             </thead>
             <tbody>
               ${this.students.map((st, idx) => {
                 const g = this.gradeReports[this.gradeReportKey(st.id, subject)] || {};
-                const finalGrade = [g.formatif, g.sumatif, g.praktik].every(Number.isFinite) ? this.calculateFinalGrade(g.formatif, g.sumatif, g.praktik) : null;
+                const entries = this.getGradeEntries(g);
+                const finalGrade = this.calculateGradeBook(entries);
                 return `
                   <tr>
                     <td>${idx + 1}</td>
                     <td><b>${st.nis}</b></td>
                     <td><b>${st.name}</b></td>
-                    <td><input type="number" min="0" max="100" class="form-input input-formatif-${st.id}" value="${g.formatif ?? ''}" placeholder="0-100"></td>
-                    <td><input type="number" min="0" max="100" class="form-input input-sumatif-${st.id}" value="${g.sumatif ?? ''}" placeholder="0-100"></td>
-                    <td><input type="number" min="0" max="100" class="form-input input-praktik-${st.id}" value="${g.praktik ?? ''}" placeholder="0-100"></td>
-                    <td>
-                      <select class="form-select select-sikap-${st.id}" style="padding: 0.3rem; font-size: 0.8rem;">
-                        <option value="A" ${g.sikap === 'A' ? 'selected' : ''}>A</option>
-                        <option value="B" ${g.sikap === 'B' ? 'selected' : ''}>B</option>
-                        <option value="C" ${g.sikap === 'C' ? 'selected' : ''}>C</option>
-                      </select>
-                    </td>
-                    <td><textarea class="form-input input-capaian-${st.id}" rows="2" placeholder="Mampu membuat komposisi visual...">${g.capaian || ''}</textarea></td>
+                    <td>${entries.length} nilai</td>
                     <td><span class="badge ${finalGrade === null ? 'badge-info' : finalGrade >= 75 ? 'badge-success' : 'badge-danger'}">${finalGrade ?? 'Belum'}</span></td>
+                    <td>${finalGrade === null ? 'Belum dinilai' : finalGrade >= 75 ? 'Tuntas' : 'Perlu bimbingan'}</td>
                     <td>
-                      <button class="btn btn-primary btn-save-student-grade" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" data-student-id="${st.id}">💾 Simpan</button>
+                      <button class="btn btn-secondary btn-toggle-grade-detail" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" data-student-id="${st.id}">✏️ Rincian</button>
                     </td>
                   </tr>
+                  <tr class="grade-detail-row grade-detail-${st.id}" hidden><td colspan="7">
+                    <div class="grade-entry-panel" data-student-id="${st.id}">
+                      <div class="grade-entry-list">${entries.map(item => this.renderGradeEntryInput(st.id, item)).join('')}</div>
+                      <button class="btn btn-secondary btn-add-grade-entry" data-student-id="${st.id}">＋ Tambah Nilai</button>
+                      <div class="grade-meta-grid">
+                        <div><label class="form-label">Sikap</label><select class="form-select select-sikap-${st.id}"><option value="A" ${g.sikap === 'A' ? 'selected' : ''}>A</option><option value="B" ${!g.sikap || g.sikap === 'B' ? 'selected' : ''}>B</option><option value="C" ${g.sikap === 'C' ? 'selected' : ''}>C</option></select></div>
+                        <div><label class="form-label">Capaian Kompetensi</label><textarea class="form-input input-capaian-${st.id}" rows="2" placeholder="Catatan capaian siswa...">${g.capaian || ''}</textarea></div>
+                      </div>
+                      <button class="btn btn-primary btn-save-student-grade" data-student-id="${st.id}">💾 Simpan Semua Nilai</button>
+                    </div>
+                  </td></tr>
                 `;
               }).join('')}
             </tbody>
@@ -2174,6 +2201,18 @@ const AppState = {
         </div>
       </div>
     `;
+  },
+
+  renderGradeEntryInput(studentId, item = {}) {
+    const types = [['tugas','Tugas'],['kuis','Kuis'],['praktik','Praktik/Proyek'],['sts','STS/UTS'],['sas','SAS/UAS'],['remedial','Remedial'],['lainnya','Lainnya']];
+    return `<div class="grade-entry" data-entry-id="${item.id || ''}">
+      <select class="form-select grade-entry-type">${types.map(([value,label]) => `<option value="${value}" ${item.type === value ? 'selected' : ''}>${label}</option>`).join('')}</select>
+      <input class="form-input grade-entry-title" value="${item.title || ''}" placeholder="Contoh: Tugas Logo 1">
+      <input type="date" class="form-input grade-entry-date" value="${item.date || ''}">
+      <input type="number" min="0" max="100" class="form-input grade-entry-score" value="${Number.isFinite(Number(item.score)) ? item.score : ''}" placeholder="Nilai">
+      <input type="number" min="1" max="100" class="form-input grade-entry-weight" value="${Number(item.weight) || 10}" placeholder="Bobot">
+      <button class="btn btn-danger btn-remove-grade-entry" type="button" title="Hapus nilai">×</button>
+    </div>`;
   },
 
   renderStudentMyGradesView() {
@@ -2188,21 +2227,19 @@ const AppState = {
         <div class="table-responsive">
           <table class="data-table">
             <thead>
-              <tr><th>Mata Pelajaran</th><th>Formatif</th><th>Sumatif</th><th>Praktik</th><th>Sikap</th><th>Nilai Akhir</th><th>Status</th><th>Capaian</th></tr>
+              <tr><th>Mata Pelajaran</th><th>Rincian Nilai</th><th>Sikap</th><th>Nilai Akhir</th><th>Status</th><th>Capaian</th></tr>
             </thead>
             <tbody>
               ${grades.length ? grades.map(item => `
                   <tr>
                     <td><b>${item.subject}</b></td>
-                    <td>${item.formatif}</td>
-                    <td>${item.sumatif}</td>
-                    <td>${item.praktik}</td>
+                    <td><div class="student-grade-chips">${this.getGradeEntries(item).map(entry => `<span><b>${entry.title}</b>: ${entry.score} <small>(${entry.weight}%)</small></span>`).join('') || 'Belum ada rincian'}</div></td>
                     <td><span class="badge badge-purple">${item.sikap}</span></td>
                     <td><b>${item.finalGrade}</b></td>
                     <td><span class="badge ${Number(item.finalGrade) >= 75 ? 'badge-success' : 'badge-danger'}">${Number(item.finalGrade) >= 75 ? '✅ Tuntas' : 'Perlu bimbingan'}</span></td>
                     <td class="grade-achievement">${item.capaian || 'Belum ada catatan capaian.'}</td>
                   </tr>
-                `).join('') : '<tr><td colspan="8" class="empty-state">Belum ada nilai yang diterbitkan oleh guru.</td></tr>'}
+                `).join('') : '<tr><td colspan="6" class="empty-state">Belum ada nilai yang diterbitkan oleh guru.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -3034,16 +3071,40 @@ const AppState = {
     document.querySelectorAll('.btn-save-student-grade').forEach(btn => {
       btn.onclick = async () => {
         const studentId = btn.getAttribute('data-student-id');
-        const formatifInput = document.querySelector(`.input-formatif-${studentId}`);
-        const sumatifInput = document.querySelector(`.input-sumatif-${studentId}`);
-        const praktikInput = document.querySelector(`.input-praktik-${studentId}`);
         const sikapSelect = document.querySelector(`.select-sikap-${studentId}`);
         const capaianInput = document.querySelector(`.input-capaian-${studentId}`);
-        if (formatifInput && sumatifInput && praktikInput && sikapSelect) {
+        const panel = document.querySelector(`.grade-entry-panel[data-student-id="${studentId}"]`);
+        const entries = panel ? [...panel.querySelectorAll('.grade-entry')].map(row => ({
+          id: row.dataset.entryId,
+          type: row.querySelector('.grade-entry-type').value,
+          title: row.querySelector('.grade-entry-title').value,
+          date: row.querySelector('.grade-entry-date').value,
+          score: row.querySelector('.grade-entry-score').value,
+          weight: row.querySelector('.grade-entry-weight').value
+        })) : [];
+        if (panel && sikapSelect) {
           btn.disabled = true;
-          await this.saveStudentGrade(studentId, this.selectedGradeSubject, formatifInput.value, sumatifInput.value, praktikInput.value, sikapSelect.value, capaianInput?.value || '');
+          await this.saveStudentGrade(studentId, this.selectedGradeSubject, entries, sikapSelect.value, capaianInput?.value || '');
           btn.disabled = false;
         }
+      };
+    });
+    document.querySelectorAll('.btn-toggle-grade-detail').forEach(btn => {
+      btn.onclick = () => {
+        const row = document.querySelector(`.grade-detail-${btn.dataset.studentId}`);
+        if (row) row.hidden = !row.hidden;
+      };
+    });
+    document.querySelectorAll('.btn-add-grade-entry').forEach(btn => {
+      btn.onclick = () => {
+        const list = btn.closest('.grade-entry-panel')?.querySelector('.grade-entry-list');
+        if (list) list.insertAdjacentHTML('beforeend', this.renderGradeEntryInput(btn.dataset.studentId));
+      };
+    });
+    document.querySelectorAll('.grade-entry-list').forEach(list => {
+      list.onclick = event => {
+        const remove = event.target.closest('.btn-remove-grade-entry');
+        if (remove) remove.closest('.grade-entry')?.remove();
       };
     });
     const gradeSubject = document.getElementById('grade-subject');
