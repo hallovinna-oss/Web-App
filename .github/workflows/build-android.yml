@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
     paths:
+      - "app.js"
+      - "styles.css"
+      - "styles-mobile.css"
+      - "theme-light.css"
+      - "firebase-init.js"
       - "capacitor.config.json"
       - "package.json"
       - "package-lock.json"
@@ -41,4 +46,3 @@ jobs:
           name: MIPHA-Companion-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
