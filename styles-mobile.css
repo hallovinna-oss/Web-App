@@ -41,12 +41,14 @@ img { max-width: 100%; height: auto; display: block; }
   backdrop-filter: blur(18px) saturate(140%);
 }
 .bottom-nav {
-  margin: 0 .55rem calc(.55rem + env(safe-area-inset-bottom));
-  width: calc(100% - 1.1rem);
-  bottom: 0;
+  left: 50%;
+  margin: 0;
+  width: min(620px, calc(100% - 1.25rem));
+  bottom: calc(.6rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
   border: 1px solid rgba(255,255,255,.86);
-  border-radius: 22px;
-  padding-bottom: .45rem;
+  border-radius: 20px;
+  padding: .32rem .35rem;
 }
 
 /* Reference-aligned liquid glass mobile shell. */
@@ -73,9 +75,9 @@ img { max-width: 100%; height: auto; display: block; }
 .bottom-nav::before {
   left: .35rem;
   width: calc((100% - .7rem) / var(--nav-count));
-  height: calc(100% + 14px);
-  border-radius: 21px;
+  height: calc(100% - 6px);
+  border-radius: 16px;
 }
-.bottom-nav .nav-item { gap: .1rem; }
+.bottom-nav .nav-item { min-height: 48px; padding: .28rem .2rem; gap: .08rem; }
 .bottom-nav .nav-item > span:last-child { font-size: .6rem; line-height: 1; }
 .login-card { border-radius: 30px; }

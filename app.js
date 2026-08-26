@@ -1007,7 +1007,7 @@ const AppState = {
       dock.style.setProperty('--nav-active', String(buttons.indexOf(nextButton)));
       this.activeView = viewName;
       clearTimeout(this._navTransitionTimer);
-      this._navTransitionTimer = setTimeout(() => this.render(), 260);
+      this._navTransitionTimer = setTimeout(() => this.render(), 340);
       return;
     }
     this.activeView = viewName;
