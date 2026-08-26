@@ -88,7 +88,16 @@ async function upsertAppRecords(rows) {
   }
 }
 
+async function hasCompletedDataMigration() {
+  const target = `${SUPABASE_URL}/rest/v1/app_records?collection=eq.settings&record_id=eq.firebaseFullMigrationV1&select=record_id&limit=1`;
+  const response = await fetch(target, { headers: { apikey: SUPABASE_SECRET_KEY, Authorization: `Bearer ${SUPABASE_SECRET_KEY}` } });
+  if (!response.ok) return false;
+  const rows = await response.json().catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 async function migrateFirebaseData(idToken) {
+  if (await hasCompletedDataMigration()) return { skipped: true };
   const collections = ['attendance', 'leaveRequests', 'students', 'assignments', 'assignmentSubmissions', 'gradeReports', 'homeVisits', 'announcements', 'settings'];
   const counts = {};
   for (const collection of collections) {
@@ -103,6 +112,13 @@ async function migrateFirebaseData(idToken) {
     if (rows.length) await upsertAppRecords(rows);
     counts[collection] = rows.length;
   }
+  await upsertAppRecords([{
+    collection: 'settings',
+    record_id: 'firebaseFullMigrationV1',
+    owner_id: null,
+    record_date: null,
+    data: { completedAt: new Date().toISOString(), counts }
+  }]);
   return counts;
 }
 

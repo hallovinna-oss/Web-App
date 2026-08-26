@@ -30,6 +30,9 @@ const SupabaseBackend = {
   fileUrlCache: new Map(),
   attendanceSnapshotReady: false,
   attendanceMigrationStarted: false,
+  lastSnapshotSignature: '',
+  reloadInFlight: false,
+  reloadPending: false,
 
   wrapUser(user, accessToken) {
     if (!user) return null;
@@ -118,6 +121,7 @@ const SupabaseBackend = {
   async login(username, password, role, localStudents) {
     const email = this.emailFor(username, role);
     const realPassword = this.passwordFor(username, password, role);
+    let migrationAttempted = false;
     let result = await supabaseClient.auth.signInWithPassword({ email, password: realPassword });
     if (result.error) {
       const student = localStudents.find(item => String(item.nis) === String(username));
@@ -127,6 +131,7 @@ const SupabaseBackend = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: String(username), password: String(password), role, student: role === 'siswa' ? student : undefined })
         });
+        migrationAttempted = true;
         if (migration.ok) result = await supabaseClient.auth.signInWithPassword({ email, password: realPassword });
         else if (role === 'guru') {
           const detail = await migration.json().catch(() => ({}));
@@ -143,6 +148,15 @@ const SupabaseBackend = {
       if (!result.data.session) throw new Error('Akun dibuat, tetapi konfirmasi email Supabase masih aktif. Nonaktifkan Confirm email di Authentication → Providers → Email.');
     }
     authFacade.currentUser = this.wrapUser(result.data.user, result.data.session?.access_token);
+    if (role === 'guru' && !migrationAttempted) {
+      // A previous partial migration may already have created the Auth user.
+      // Re-entering through this idempotent bridge ensures Firestore records are copied too.
+      await fetch('/.netlify/functions/migrate-auth-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: String(username), password: String(password), role })
+      }).catch(error => console.warn('Background Firebase data migration failed:', error));
+    }
     const uid = result.data.user.id;
     let { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('uid', uid).maybeSingle();
     if (error) throw error;
@@ -236,13 +250,21 @@ const SupabaseBackend = {
   },
 
   async loadCollection(collection) {
-    const result = await supabaseClient.from('app_records').select('*').eq('collection', collection); if (result.error) throw result.error;
+    const result = await supabaseClient.from('app_records').select('*').eq('collection', collection).order('record_id'); if (result.error) throw result.error;
     return result.data.map(row => ({ id: row.record_id, ...(row.data || {}) }));
   },
 
   async reloadAll(appState) {
     const names = ['attendance','leaveRequests','students','assignments','assignmentSubmissions','gradeReports','homeVisits','announcements','settings'];
     const loaded = Object.fromEntries(await Promise.all(names.map(async name => [name, await this.loadCollection(name)])));
+    const signature = JSON.stringify(loaded);
+    if (signature === this.lastSnapshotSignature) {
+      const first = !this.attendanceSnapshotReady;
+      this.attendanceSnapshotReady = true;
+      if (first) this.migrateOfficialAttendanceOnce(appState).catch(console.error);
+      return false;
+    }
+    this.lastSnapshotSignature = signature;
     const historical = {}, today = appState.attendanceDate || new Date().toISOString().slice(0,10), day = {};
     loaded.attendance.forEach(item => { const status = this.normalizeAttendanceStatus(item.status); if (!item.studentId || !item.date || !status) return; (historical[item.studentId] ||= {})[item.date] = status; if (item.date === today) day[item.studentId] = item; });
     appState.historicalAttendance = historical; appState.monthlyAttendance = JSON.parse(JSON.stringify(historical)); appState.attendance = day;
@@ -254,13 +276,33 @@ const SupabaseBackend = {
     localStorage.setItem('dkvf_attendance', JSON.stringify(day)); localStorage.setItem('dkvf_historical_attendance', JSON.stringify(historical)); localStorage.setItem('mipha_grade_reports', JSON.stringify(appState.gradeReports));
     const first = !this.attendanceSnapshotReady; this.attendanceSnapshotReady = true; if (first) this.migrateOfficialAttendanceOnce(appState).catch(console.error);
     this.requestRender(appState);
+    return true;
+  },
+
+  queueReload(appState, delay = 650) {
+    clearTimeout(this.reloadTimer);
+    this.reloadTimer = setTimeout(async () => {
+      if (this.reloadInFlight) { this.reloadPending = true; return; }
+      this.reloadInFlight = true;
+      try {
+        do {
+          this.reloadPending = false;
+          await this.reloadAll(appState);
+        } while (this.reloadPending);
+      } catch (error) {
+        console.error('Supabase load failed:', error);
+      } finally {
+        this.reloadInFlight = false;
+      }
+    }, delay);
   },
 
   startListeners(appState) {
     this.stopListeners(); this.attendanceSnapshotReady = false;
-    this.reloadAll(appState).catch(error => console.error('Supabase load failed:', error));
+    this.lastSnapshotSignature = '';
+    this.queueReload(appState, 0);
     const channel = supabaseClient.channel('mipha-records').on('postgres_changes', { event: '*', schema: 'public', table: 'app_records' }, () => {
-      clearTimeout(this.reloadTimer); this.reloadTimer = setTimeout(() => this.reloadAll(appState).catch(console.error), 250);
+      this.queueReload(appState);
     }).subscribe();
     this.channels.push(channel);
   }
