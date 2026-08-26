@@ -67,7 +67,7 @@ img { max-width: 100%; height: auto; display: block; }
 .welcome-banner { min-height: 166px; }
 .welcome-banner::before { width: 122px; height: 122px; right: -12px; top: -22px; }
 .bottom-nav {
-  background: linear-gradient(155deg, rgba(255,255,255,.78), rgba(246,243,252,.54));
+  background: linear-gradient(155deg, rgba(255,255,255,.48), rgba(246,243,252,.22));
   -webkit-backdrop-filter: blur(30px) saturate(165%);
   backdrop-filter: blur(30px) saturate(165%);
   box-shadow: 0 20px 46px rgba(65,52,99,.16), inset 0 1px 0 #fff;

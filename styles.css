@@ -1235,11 +1235,11 @@ body {
 .bottom-nav {
   isolation: isolate;
   overflow: visible;
-  background: linear-gradient(155deg, rgba(255,255,255,.70), rgba(246,243,252,.46));
-  border: 1px solid rgba(255,255,255,.90);
+  background: linear-gradient(155deg, rgba(255,255,255,.46), rgba(246,243,252,.20));
+  border: 1px solid rgba(255,255,255,.74);
   -webkit-backdrop-filter: blur(32px) saturate(160%);
   backdrop-filter: blur(32px) saturate(160%);
-  box-shadow: 0 24px 58px rgba(65,52,99,.11), inset 0 1px 0 #fff;
+  box-shadow: 0 18px 42px rgba(65,52,99,.12), inset 0 1px 0 rgba(255,255,255,.82);
 }
 .bottom-nav::before {
   content: "";
@@ -1249,12 +1249,12 @@ body {
   left: .7rem;
   width: calc((100% - 1.4rem) / var(--nav-count));
   height: calc(100% - 8px);
-  border: 1px solid rgba(255,255,255,.96);
+  border: 1px solid rgba(255,255,255,.76);
   border-radius: 18px;
-  background: radial-gradient(circle at 50% 14%,rgba(255,255,255,.88),transparent 26%),linear-gradient(150deg,rgba(255,255,255,.70),rgba(218,197,255,.48) 58%,rgba(255,210,231,.38));
-  -webkit-backdrop-filter: blur(22px) saturate(190%);
-  backdrop-filter: blur(22px) saturate(190%);
-  box-shadow: 0 8px 20px rgba(91,62,143,.16),inset 0 1px 1px #fff,inset 0 -7px 18px rgba(143,99,211,.10);
+  background: radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.48),transparent 52%),linear-gradient(145deg,rgba(255,255,255,.26),rgba(210,190,245,.10) 60%,rgba(255,255,255,.08));
+  -webkit-backdrop-filter: blur(12px) saturate(155%);
+  backdrop-filter: blur(12px) saturate(155%);
+  box-shadow: 0 7px 18px rgba(91,62,143,.13),inset 0 1px 0 rgba(255,255,255,.92),inset 0 -1px 0 rgba(121,88,173,.10);
   transform: translate3d(calc(var(--nav-active) * 100%), -50%, 0);
   transition: transform .32s cubic-bezier(.2,.85,.25,1),box-shadow .24s ease;
   pointer-events: none;
@@ -1267,6 +1267,10 @@ body {
   transform: translateY(-1px);
 }
 .nav-item.active .nav-icon { filter: drop-shadow(0 3px 6px rgba(90,52,145,.20)); transform: scale(1.06); }
+.nav-item:not(.active):hover {
+  background: rgba(255,255,255,.14);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.34);
+}
 
 .login-container {
   background:
