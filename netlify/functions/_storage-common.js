@@ -1,19 +1,20 @@
-const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyCz7C-Vq-l9Q1Vp3F_gFmbznmiLPs1ICPY';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://vptvntgijeegognwuqzm.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_bR1BqSLLTJQPuIrJsn2SEw_2RE0ceAO';
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(body) };
 }
 
-async function requireFirebaseUser(event) {
+async function requireSupabaseUser(event) {
   const header = event.headers.authorization || event.headers.Authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw Object.assign(new Error('Login diperlukan.'), { statusCode: 401 });
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken: token })
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${token}` }
   });
   const result = await response.json();
-  if (!response.ok || !result.users?.[0]) throw Object.assign(new Error('Sesi login tidak valid.'), { statusCode: 401 });
-  return result.users[0];
+  if (!response.ok || !result.id) throw Object.assign(new Error('Sesi login tidak valid.'), { statusCode: 401 });
+  return result;
 }
 
 function config() {
@@ -43,4 +44,4 @@ async function ensureFolders(cfg, relativeFolder) {
   }
 }
 
-module.exports = { json, requireFirebaseUser, config, safeSegment, webdavUrl, ensureFolders };
+module.exports = { json, requireSupabaseUser, config, safeSegment, webdavUrl, ensureFolders };

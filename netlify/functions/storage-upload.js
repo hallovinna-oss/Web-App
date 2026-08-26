@@ -1,9 +1,9 @@
-const { json, requireFirebaseUser, config, safeSegment, webdavUrl, ensureFolders } = require('./_storage-common');
+const { json, requireSupabaseUser, config, safeSegment, webdavUrl, ensureFolders } = require('./_storage-common');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
-    const user = await requireFirebaseUser(event);
+    const user = await requireSupabaseUser(event);
     const input = JSON.parse(event.body || '{}');
     const size = Number(input.size || 0);
     if (!input.data || size <= 0 || size > 4 * 1024 * 1024) return json(400, { error: 'File harus berukuran 1 byte sampai 4 MB.' });
@@ -17,7 +17,7 @@ exports.handler = async (event) => {
     const folder = [
       cfg.root,
       'data-siswa',
-      safeSegment(input.ownerId || user.localId, user.localId),
+      safeSegment(input.ownerId || user.id, user.id),
       safeSegment(input.category, 'documents'),
       uploadDate,
       safeSegment(input.metadata?.type, 'umum'),

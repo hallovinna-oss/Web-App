@@ -154,7 +154,7 @@ const AppState = {
   activeAssignmentSubmissionId: null,
   attendanceDate: null,
   themePreference: 'light',
-  firebaseListenersStarted: false,
+  backendListenersStarted: false,
 
   init() {
     try {
@@ -312,19 +312,19 @@ const AppState = {
 
   restorePersistedSessionIfAvailable() {
     const persisted = this.getPersistedCurrentUser();
-    if (!persisted || !window.FirebaseBackend || !FirebaseBackend.auth) return;
+    if (!persisted || !window.SupabaseBackend || !SupabaseBackend.auth) return;
 
     this.currentUser = persisted;
 
-    FirebaseBackend.auth.onAuthStateChanged((user) => {
-      if (user && !this.firebaseListenersStarted) {
-        this.firebaseListenersStarted = true;
-        FirebaseBackend.startListeners(this);
+    SupabaseBackend.auth.onAuthStateChanged((user) => {
+      if (user && !this.backendListenersStarted) {
+        this.backendListenersStarted = true;
+        SupabaseBackend.startListeners(this);
       } else if (!user && this.currentUser) {
         // Never keep a local-only "logged in" screen: cloud writes require a
-        // verified Firebase user. The next login is then persisted by Firebase.
+        // verified Supabase user. The next login is persisted by Supabase Auth.
         this.currentUser = null;
-        this.firebaseListenersStarted = false;
+        this.backendListenersStarted = false;
         this.clearPersistedCurrentUser();
         this.render();
       }
@@ -527,15 +527,15 @@ const AppState = {
     if (this.currentUser) {
       this.persistCurrentUser();
     }
-    if (window.FirebaseBackend) FirebaseBackend.scheduleSync(this);
+    if (window.SupabaseBackend) SupabaseBackend.scheduleSync(this);
   },
 
   async uploadCloudFile(file, category, ownerId, metadata = {}) {
     if (!file) return null;
-    if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
-      throw new Error('Login Firebase diperlukan untuk menyimpan file di cloud.');
+    if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) {
+      throw new Error('Login Supabase diperlukan untuk menyimpan file di cloud.');
     }
-    return FirebaseBackend.uploadFile(file, category, ownerId, metadata);
+    return SupabaseBackend.uploadFile(file, category, ownerId, metadata);
   },
 
   generateEmptyDailyAttendance() {
@@ -861,9 +861,9 @@ const AppState = {
     this.logAudit(`Check-in Sekolah oleh ${this.currentUser.name} (${status.toUpperCase()}, ${distance}m)${campus && campus.name ? ' @ ' + campus.name : ''}`);
     this.saveState();
     const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
-    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+    if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
       try {
-        await FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]);
+        await SupabaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]);
         attendanceRecord.cloudSync = 'success';
       } catch (error) {
         attendanceRecord.cloudSync = 'failed';
@@ -872,12 +872,12 @@ const AppState = {
       }
     } else {
       attendanceRecord.cloudSync = 'pending';
-      attendanceRecord.cloudSyncMessage = 'Menunggu login Firebase.';
+      attendanceRecord.cloudSyncMessage = 'Menunggu login Supabase.';
     }
 
-    if ((method === 'gps' || method === 'nis' || method === 'pin') && window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
+    if ((method === 'gps' || method === 'nis' || method === 'pin') && window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
       try {
-        const moncerResult = await FirebaseBackend.syncMoncerAttendance(this.currentUser.nis, attendanceRecord);
+        const moncerResult = await SupabaseBackend.syncMoncerAttendance(this.currentUser.nis, attendanceRecord);
         attendanceRecord.moncerSync = 'success';
         attendanceRecord.moncerSyncedAt = new Date().toISOString();
         attendanceRecord.moncerStatus = moncerResult.data?.status || null;
@@ -889,7 +889,7 @@ const AppState = {
 
       this.attendance[studentId] = attendanceRecord;
       this.saveState();
-      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, status, attendanceRecord)
+      SupabaseBackend.writeAttendanceRecord(studentId, todayDate, status, attendanceRecord)
         .catch(error => console.warn('Cloud sync status update failed:', error));
     }
     return {
@@ -999,6 +999,17 @@ const AppState = {
   },
 
   switchView(viewName) {
+    const dock = document.querySelector('.bottom-nav');
+    const nextButton = dock?.querySelector(`[data-view="${viewName}"]`);
+    if (dock && nextButton && viewName !== this.activeView) {
+      const buttons = [...dock.querySelectorAll('.nav-item')];
+      buttons.forEach(button => button.classList.toggle('active', button === nextButton));
+      dock.style.setProperty('--nav-active', String(buttons.indexOf(nextButton)));
+      this.activeView = viewName;
+      clearTimeout(this._navTransitionTimer);
+      this._navTransitionTimer = setTimeout(() => this.render(), 340);
+      return;
+    }
     this.activeView = viewName;
     this.render();
   },
@@ -1007,30 +1018,30 @@ const AppState = {
     const cleanUsername = String(username || '').trim();
     const cleanPassword = String(password || '');
     try {
-      if (!window.FirebaseBackend) throw new Error('Firebase failed to load. Check your internet connection.');
-      const profile = await FirebaseBackend.login(cleanUsername, cleanPassword, role, this.students);
+      if (!window.SupabaseBackend) throw new Error('Supabase gagal dimuat. Periksa koneksi internet.');
+      const profile = await SupabaseBackend.login(cleanUsername, cleanPassword, role, this.students);
       if (role === 'guru') {
         this.currentUser = { ...profile, role: 'guru' };
-        await FirebaseBackend.seedStudents(this.students);
+        await SupabaseBackend.seedStudents(this.students);
       } else {
         const localStudent = this.students.find(s => String(s.nis) === cleanUsername);
         this.currentUser = { ...(localStudent || {}), ...profile, role: 'siswa' };
       }
       this.persistCurrentUser();
       this.activeView = 'dashboard';
-      this.firebaseListenersStarted = true;
-      FirebaseBackend.startListeners(this);
-      this.logAudit(`${this.currentUser.name} berhasil masuk melalui Firebase`);
+      this.backendListenersStarted = true;
+      SupabaseBackend.startListeners(this);
+      this.logAudit(`${this.currentUser.name} berhasil masuk melalui Supabase`);
       this.render();
       if (window.MiphaAndroidNotifications) window.MiphaAndroidNotifications.sync(this);
       return { success: true };
     } catch (error) {
-      console.error('Firebase login error:', error);
+      console.error('Supabase login error:', error);
       const messages = {
         'auth/invalid-credential': 'NIS/username atau password salah.',
         'auth/wrong-password': 'NIS/username atau password salah.',
         'auth/too-many-requests': 'Terlalu banyak percobaan. Coba lagi beberapa saat.',
-        'auth/network-request-failed': 'Tidak dapat terhubung ke Firebase. Periksa internet.'
+        'auth/network-request-failed': 'Tidak dapat terhubung ke Supabase. Periksa internet.'
       };
       return { success: false, message: messages[error.code] || error.message || 'Login gagal.' };
     }
@@ -1038,9 +1049,9 @@ const AppState = {
 
   async logout() {
     if (this.currentUser) this.logAudit(`Pengguna ${this.currentUser.name} keluar`);
-    try { if (window.FirebaseBackend) await FirebaseBackend.logout(); } catch (e) { console.warn(e); }
+    try { if (window.SupabaseBackend) await SupabaseBackend.logout(); } catch (e) { console.warn(e); }
     this.currentUser = null;
-    this.firebaseListenersStarted = false;
+    this.backendListenersStarted = false;
     this.clearPersistedCurrentUser();
     sessionStorage.clear();
     this.render();
@@ -1069,8 +1080,8 @@ const AppState = {
     this.recordMonthlyAttendanceForDate(todayDate, this.attendance);
     this.logAudit(`Manual edit attendance for ${this.students.find((s) => s.id === studentId).name}`);
     this.saveState();
-    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
-      FirebaseBackend.writeAttendanceRecord(studentId, todayDate, this.attendance[studentId].status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
+    if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
+      SupabaseBackend.writeAttendanceRecord(studentId, todayDate, this.attendance[studentId].status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
     }
   },
 
@@ -1084,8 +1095,8 @@ const AppState = {
     const nextStatus = cycle[(normalizedIndex + 1) % cycle.length];
     this.setAttendanceStatusForDate(studentId, date, nextStatus);
     this.saveState();
-    if (window.FirebaseBackend && FirebaseBackend.auth.currentUser) {
-      FirebaseBackend.writeAttendanceRecord(studentId, this.formatDateKey(date), nextStatus, this.students.find((s) => s.id === studentId)).catch(error => console.warn('Cloud sync failed:', error));
+    if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
+      SupabaseBackend.writeAttendanceRecord(studentId, this.formatDateKey(date), nextStatus, this.students.find((s) => s.id === studentId)).catch(error => console.warn('Cloud sync failed:', error));
     }
   },
 
@@ -1224,8 +1235,8 @@ const AppState = {
     const id = this.gradeReportKey(studentId, subject);
     const report = { id, studentId, studentNis: student.nis, studentName: student.name, className: student.class || 'X DKV F', subject, semester: this.selectedGradeSemester, entries: cleanEntries, sikap: sikap || 'B', capaian: String(capaian || '').trim(), finalGrade: this.calculateGradeBook(cleanEntries) };
     try {
-      if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) throw new Error('Login Firebase diperlukan.');
-      await FirebaseBackend.writeGradeReport(report);
+      if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) throw new Error('Login Supabase diperlukan.');
+      await SupabaseBackend.writeGradeReport(report);
       this.gradeReports[id] = report;
       this.logAudit(`Nilai ${subject} untuk ${student.name} diperbarui`);
       this.saveState();
@@ -1239,7 +1250,7 @@ const AppState = {
     if (!leave || !leave.attachmentData) return;
     if (leave.attachmentPath) {
       try {
-        await FirebaseBackend.downloadFile(leave.attachmentPath, leave.attachmentName || leave.attachment);
+        await SupabaseBackend.downloadFile(leave.attachmentPath, leave.attachmentName || leave.attachment);
       } catch (error) {
         alert('Gagal membuka lampiran: ' + error.message);
       }
@@ -1379,11 +1390,11 @@ const AppState = {
       <header class="app-header">
         <div class="header-brand">
           <div class="brand-icon">
-            <img class="brand-logo brand-logo-light" src="./moncer-white.png" alt="MONCER"><img class="brand-logo brand-logo-dark" src="./moncer-blue.png" alt="MONCER">
+            <img class="brand-logo" src="./logo.png" alt="SMK Bhumi Phala">
           </div>
           <div>
-            <div class="brand-title">MIPHA COMPANION</div>
-            <div class="brand-subtitle">SMK Bhumi Phala Parakan</div>
+            <div class="brand-title">MIPHA KU</div>
+            <div class="brand-subtitle">Portal Kelas X DKV F</div>
           </div>
         </div>
         <div class="header-user-info">
@@ -1417,7 +1428,7 @@ const AppState = {
     ];
 
     return `
-      <nav class="bottom-nav">
+      <nav class="bottom-nav" style="--nav-count:${items.length};--nav-active:${Math.max(0, items.findIndex(item => item.view === this.activeView))}">
         ${items.map(item => `
           <button class="nav-item ${this.activeView === item.view ? 'active' : ''}" data-view="${item.view}">
             <span class="nav-icon">${item.icon}</span>
@@ -1432,20 +1443,28 @@ const AppState = {
     return `
       <div class="login-container">
         <div class="login-card fade-in">
-          <div class="login-header">
-            <div class="login-logo">
-              <img class="login-logo-light" src="./moncer-blue.png" alt="MONCER"><img class="login-logo-dark" src="./moncer-white.png" alt="MONCER">
+          <section class="login-brand-panel">
+            <div class="login-header">
+              <div class="login-logo">
+                <img src="./logo.png" alt="SMK Bhumi Phala">
+              </div>
+              <div class="login-brand-copy">
+                <span class="login-eyebrow">PORTAL KELAS MIPHA</span>
+                <h2>MIPHA KU</h2>
+                <p>Ruang digital kelas untuk belajar, hadir, dan berkembang bersama.</p>
+              </div>
             </div>
-            <h2 style="color: var(--primary-dark); font-weight: 800; font-size: 1.3rem;">MIPHA COMPANION</h2>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; font-weight: 600;">SMK Bhumi Phala Parakan</p>
-          </div>
+            <div class="login-brand-badge">SMK Bhumi Phala · Parakan</div>
+          </section>
 
-          <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
-            <button type="button" class="btn btn-block ${this.loginRole !== 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-siswa">🎓 Login Siswa</button>
-            <button type="button" class="btn btn-block ${this.loginRole === 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-guru">👑 Login Wali Kelas</button>
-          </div>
+          <section class="login-form-panel">
+            <div class="login-welcome"><span>Selamat datang</span><strong>Masuk ke akun Anda</strong></div>
+            <div class="login-role-switch">
+              <button type="button" class="btn ${this.loginRole !== 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-siswa">🎓 Siswa</button>
+              <button type="button" class="btn ${this.loginRole === 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-guru">👑 Wali Kelas</button>
+            </div>
 
-          <form id="form-login" autocomplete="off">
+            <form id="form-login" autocomplete="off">
             <div class="form-group">
               <label class="form-label">${this.loginRole === 'guru' ? 'Username Wali Kelas' : 'Nomor Induk Siswa (NIS)'}</label>
               <input type="text" inputmode="numeric" class="form-input" id="login-username" autocomplete="off" placeholder="${this.loginRole === 'guru' ? 'Masukkan username wali kelas' : 'Masukkan NIS Anda'}" required>
@@ -1458,12 +1477,11 @@ const AppState = {
 
             <div id="login-error" style="color: var(--status-danger); font-size: 0.82rem; margin-bottom: 1rem; display: none;"></div>
 
-            <button type="submit" class="btn btn-primary btn-block" style="padding: 0.85rem;">Masuk ke Aplikasi 👉</button>
-          </form>
+              <button type="submit" class="btn btn-primary btn-block login-submit">Masuk ke MIPHA KU <span>→</span></button>
+            </form>
 
-          <div style="margin-top: 1rem; text-align: center; font-size: 0.78rem; color: var(--text-muted); border-top: 1px solid var(--border-light); padding-top: 1rem;">
-            MIPHA Companion v1.0 RC5 · Production Edition<br>Radius Dua Kampus: <b>100 Meter</b> | Jam Masuk: <b>07.00 WIB</b>
-          </div>
+            <div class="login-meta">📍 Radius dua kampus 100 m <span>•</span> Check-in 07.00 WIB</div>
+          </section>
         </div>
       </div>
     `;
@@ -1489,7 +1507,7 @@ const AppState = {
         const username = document.getElementById('login-username').value;
         const pin = document.getElementById('login-pin').value;
         const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Menghubungkan ke Firebase...'; }
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Menghubungkan ke Supabase...'; }
         const res = await this.login(username, pin, this.loginRole);
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Masuk ke Aplikasi 👉'; }
         if (!res.success) {
@@ -1545,12 +1563,12 @@ const AppState = {
       </div>
 
       <div class="card" style="border-left:4px solid var(--accent-magenta);">
-        <div class="card-header-flex"><div class="card-title">🎒 My School Day</div><button class="btn btn-secondary" data-view="student_profile">Complete Profile</button></div>
+        <div class="card-header-flex"><div class="card-title">🎒 Aktivitas Sekolahku</div><button class="btn btn-secondary" data-view="student_profile">Lengkapi Profil</button></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;font-size:.85rem;">
-          <div><b>📚 Assignments</b><br>${this.assignments.length} active</div>
-          <div><b>🏆 Achievements</b><br>${(student.achievements||[]).length} recorded</div>
-          <div><b>📍 Home Location</b><br>${student.homeLat ? '✅ Registered' : '⚠️ Not registered'}</div>
-          <div><b>📢 Announcements</b><br>${this.announcements.length} available</div>
+          <div><b>📚 Tugas</b><br>${this.assignments.length} aktif</div>
+          <div><b>🏆 Prestasi</b><br>${(student.achievements||[]).length} tercatat</div>
+          <div><b>📍 Lokasi Rumah</b><br>${student.homeLat ? '✅ Terdaftar' : '⚠️ Belum terdaftar'}</div>
+          <div><b>📢 Pengumuman</b><br>${this.announcements.length} tersedia</div>
         </div>
       </div>
 
@@ -1662,8 +1680,8 @@ const AppState = {
     return `
       <div class="welcome-banner" style="background: linear-gradient(135deg, var(--primary-dark) 0%, var(--accent-magenta) 100%);">
         <span class="banner-role">Wali Kelas X DKV F</span>
-        <h2 style="font-size: 1.35rem; font-weight: 800;">Welcome back, ${this.teacherProfile.name} 👋</h2>
-        <p style="font-size: 0.88rem; opacity: 0.95; margin-top: 4px; font-weight: 500;">Your teacher workspace for attendance, student support, assignments, and home visits.</p>
+        <h2 style="font-size: 1.35rem; font-weight: 800;">Selamat datang, ${this.teacherProfile.name} 👋</h2>
+        <p style="font-size: 0.88rem; opacity: 0.95; margin-top: 4px; font-weight: 500;">Ruang kerja wali kelas untuk presensi, pendampingan siswa, tugas, nilai, dan home visit.</p>
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem;">
@@ -2695,7 +2713,7 @@ const AppState = {
     assignment.submissions = submissions;
     assignment.submittedBy = submissions.map((item) => item.studentId);
     assignment.submitted = submissions.length;
-    if (window.FirebaseBackend) await FirebaseBackend.writeAssignmentSubmission(assignmentId, submission);
+    if (window.SupabaseBackend) await SupabaseBackend.writeAssignmentSubmission(assignmentId, submission);
     this.logAudit(`Mengumpulkan tugas: ${assignment.title}`);
     this.activeAssignmentSubmissionId = null;
     this.saveState();
@@ -2764,7 +2782,7 @@ const AppState = {
   },
 
   setupViewEvents() {
-    if (window.FirebaseBackend) FirebaseBackend.hydrateProtectedImages(document);
+    if (window.SupabaseBackend) SupabaseBackend.hydrateProtectedImages(document);
     const themeBtn = document.getElementById('btn-theme-toggle');
     if (themeBtn) themeBtn.onclick = () => this.cycleTheme();
     const teacherPhoto = document.getElementById('teacher-photo-input');
@@ -2784,7 +2802,7 @@ const AppState = {
       const data = btn.dataset.attachment;
       if (!data) return;
       if (btn.dataset.path) {
-        FirebaseBackend.downloadFile(btn.dataset.path, name).catch(error => alert('Gagal membuka lampiran: '+error.message));
+        SupabaseBackend.downloadFile(btn.dataset.path, name).catch(error => alert('Gagal membuka lampiran: '+error.message));
         return;
       }
       const win = window.open('', '_blank');
@@ -2850,8 +2868,8 @@ const AppState = {
       if (next.length < 6) return alert('Password baru minimal 6 karakter.');
       if (next !== confirmNext) return alert('Konfirmasi password tidak cocok.');
       try {
-        await FirebaseBackend.changeOwnPassword(current, next, this.currentUser.nis || this.currentUser.username, this.currentUser.role);
-        alert('✅ Password Firebase berhasil diperbarui.');
+        await SupabaseBackend.changeOwnPassword(current, next, this.currentUser.nis || this.currentUser.username, this.currentUser.role);
+        alert('✅ Password Supabase berhasil diperbarui.');
         studentPasswordForm.reset();
       } catch (error) {
         console.error(error);
@@ -2862,7 +2880,7 @@ const AppState = {
     document.querySelectorAll('.btn-reset-student-password').forEach(btn => btn.onclick = () => {
       const student = this.students.find(s => s.id === btn.dataset.studentId);
       if (!student) return;
-      alert(`Reset password Firebase untuk ${student.name} memerlukan Firebase Admin SDK / Cloud Function. Untuk pilot gratis, lakukan reset akun dari Firebase Console → Authentication → Users. Password siswa tidak dapat dilihat oleh wali kelas.`);
+      alert(`Reset password Supabase untuk ${student.name} memerlukan Supabase Admin API / server function. Untuk pilot gratis, lakukan reset akun dari Supabase Dashboard → Authentication → Users. Password siswa tidak dapat dilihat oleh wali kelas.`);
     });
 
     const logoutBtn = document.getElementById('btn-logout');
@@ -3589,10 +3607,10 @@ const AppState = {
           });
 
           if (!cloudUpdates.length) throw new Error('Tidak ada data absensi yang berhasil dibaca dari file.');
-          if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
-            throw new Error('Login Firebase diperlukan untuk menyimpan hasil impor.');
+          if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) {
+            throw new Error('Login Supabase diperlukan untuk menyimpan hasil impor.');
           }
-          await FirebaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
+          await SupabaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
           localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
           localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
           this.saveState();
@@ -3718,10 +3736,10 @@ const AppState = {
     if (!updatedCount) throw new Error('Tidak ada baris siswa yang berhasil dipetakan.');
 
     if (cloudUpdates.length) {
-      if (!window.FirebaseBackend || !FirebaseBackend.auth.currentUser) {
-        throw new Error('Login Firebase diperlukan untuk menyimpan hasil impor.');
+      if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) {
+        throw new Error('Login Supabase diperlukan untuk menyimpan hasil impor.');
       }
-      await FirebaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
+      await SupabaseBackend.writeImportedAttendanceRecords(cloudUpdates, this.students);
     }
 
     localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));

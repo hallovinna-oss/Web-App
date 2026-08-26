@@ -9,7 +9,7 @@ on:
       - "styles.css"
       - "styles-mobile.css"
       - "theme-light.css"
-      - "firebase-init.js"
+      - "supabase-init.js"
       - "capacitor.config.json"
       - "package.json"
       - "package-lock.json"

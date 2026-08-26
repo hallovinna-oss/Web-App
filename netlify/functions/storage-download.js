@@ -1,9 +1,9 @@
-const { json, requireFirebaseUser, config, webdavUrl } = require('./_storage-common');
+const { json, requireSupabaseUser, config, webdavUrl } = require('./_storage-common');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
-    await requireFirebaseUser(event);
+    await requireSupabaseUser(event);
     const input = JSON.parse(event.body || '{}');
     const cfg = config();
     const path = String(input.path || '');
