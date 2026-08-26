@@ -147,6 +147,19 @@ const SupabaseBackend = {
     let { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('uid', uid).maybeSingle();
     if (error) throw error;
     if (!profile) {
+      const student = localStudents.find(item => String(item.nis) === String(username));
+      const recovery = await fetch('/.netlify/functions/migrate-auth-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: String(username), password: String(password), role, student: role === 'siswa' ? student : undefined })
+      });
+      if (recovery.ok) {
+        const recovered = await supabaseClient.from('profiles').select('*').eq('uid', uid).maybeSingle();
+        if (recovered.error) throw recovered.error;
+        profile = recovered.data;
+      }
+    }
+    if (!profile) {
       if (role === 'guru') throw new Error('Profil guru Supabase belum diprovisikan.');
       const student = localStudents.find(item => String(item.nis) === String(username));
       const payload = this.clean({ ...student }); delete payload.password; delete payload.pin;
