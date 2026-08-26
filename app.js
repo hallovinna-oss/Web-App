@@ -1443,20 +1443,28 @@ const AppState = {
     return `
       <div class="login-container">
         <div class="login-card fade-in">
-          <div class="login-header">
-            <div class="login-logo">
-              <img src="./logo.png" alt="SMK Bhumi Phala">
+          <section class="login-brand-panel">
+            <div class="login-header">
+              <div class="login-logo">
+                <img src="./logo.png" alt="SMK Bhumi Phala">
+              </div>
+              <div class="login-brand-copy">
+                <span class="login-eyebrow">PORTAL KELAS X DKV F</span>
+                <h2>MIPHA KU</h2>
+                <p>Ruang digital kelas untuk belajar, hadir, dan berkembang bersama.</p>
+              </div>
             </div>
-            <h2 style="color: var(--primary-dark); font-weight: 800; font-size: 1.3rem;">MIPHA KU</h2>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; font-weight: 600;">Portal Digital X DKV F · SMK Bhumi Phala</p>
-          </div>
+            <div class="login-brand-badge">SMK Bhumi Phala · Parakan</div>
+          </section>
 
-          <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
-            <button type="button" class="btn btn-block ${this.loginRole !== 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-siswa">🎓 Login Siswa</button>
-            <button type="button" class="btn btn-block ${this.loginRole === 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-guru">👑 Login Wali Kelas</button>
-          </div>
+          <section class="login-form-panel">
+            <div class="login-welcome"><span>Selamat datang</span><strong>Masuk ke akun Anda</strong></div>
+            <div class="login-role-switch">
+              <button type="button" class="btn ${this.loginRole !== 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-siswa">🎓 Siswa</button>
+              <button type="button" class="btn ${this.loginRole === 'guru' ? 'btn-primary' : 'btn-secondary'}" id="tab-login-guru">👑 Wali Kelas</button>
+            </div>
 
-          <form id="form-login" autocomplete="off">
+            <form id="form-login" autocomplete="off">
             <div class="form-group">
               <label class="form-label">${this.loginRole === 'guru' ? 'Username Wali Kelas' : 'Nomor Induk Siswa (NIS)'}</label>
               <input type="text" inputmode="numeric" class="form-input" id="login-username" autocomplete="off" placeholder="${this.loginRole === 'guru' ? 'Masukkan username wali kelas' : 'Masukkan NIS Anda'}" required>
@@ -1469,12 +1477,11 @@ const AppState = {
 
             <div id="login-error" style="color: var(--status-danger); font-size: 0.82rem; margin-bottom: 1rem; display: none;"></div>
 
-            <button type="submit" class="btn btn-primary btn-block" style="padding: 0.85rem;">Masuk ke Aplikasi 👉</button>
-          </form>
+              <button type="submit" class="btn btn-primary btn-block login-submit">Masuk ke MIPHA KU <span>→</span></button>
+            </form>
 
-          <div style="margin-top: 1rem; text-align: center; font-size: 0.78rem; color: var(--text-muted); border-top: 1px solid var(--border-light); padding-top: 1rem;">
-            MIPHA KU · Portal Kelas X DKV F<br>Radius dua kampus: <b>100 meter</b> · Jam masuk: <b>07.00 WIB</b>
-          </div>
+            <div class="login-meta">📍 Radius dua kampus 100 m <span>•</span> Check-in 07.00 WIB</div>
+          </section>
         </div>
       </div>
     `;
