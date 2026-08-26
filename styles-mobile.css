@@ -31,3 +31,20 @@ button, .btn, .nav-item { min-height: 44px; }
 
 /* ensure images don't block layout */
 img { max-width: 100%; height: auto; display: block; }
+
+/* Keep the glass hierarchy visible on mobile without sacrificing readability. */
+.card {
+  background: rgba(255,255,255,.72);
+  border-color: rgba(255,255,255,.82);
+  box-shadow: 0 12px 32px rgba(61,23,104,.10), inset 0 1px 0 rgba(255,255,255,.9);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+.bottom-nav {
+  margin: 0 .55rem calc(.55rem + env(safe-area-inset-bottom));
+  width: calc(100% - 1.1rem);
+  bottom: 0;
+  border: 1px solid rgba(255,255,255,.86);
+  border-radius: 22px;
+  padding-bottom: .45rem;
+}
