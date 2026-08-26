@@ -1379,11 +1379,11 @@ const AppState = {
       <header class="app-header">
         <div class="header-brand">
           <div class="brand-icon">
-            <img class="brand-logo brand-logo-light" src="./moncer-white.png" alt="MONCER"><img class="brand-logo brand-logo-dark" src="./moncer-blue.png" alt="MONCER">
+            <img class="brand-logo" src="./logo.png" alt="SMK Bhumi Phala">
           </div>
           <div>
-            <div class="brand-title">MIPHA COMPANION</div>
-            <div class="brand-subtitle">SMK Bhumi Phala Parakan</div>
+            <div class="brand-title">MIPHA KU</div>
+            <div class="brand-subtitle">Portal Kelas X DKV F</div>
           </div>
         </div>
         <div class="header-user-info">
@@ -1434,10 +1434,10 @@ const AppState = {
         <div class="login-card fade-in">
           <div class="login-header">
             <div class="login-logo">
-              <img class="login-logo-light" src="./moncer-blue.png" alt="MONCER"><img class="login-logo-dark" src="./moncer-white.png" alt="MONCER">
+              <img src="./logo.png" alt="SMK Bhumi Phala">
             </div>
-            <h2 style="color: var(--primary-dark); font-weight: 800; font-size: 1.3rem;">MIPHA COMPANION</h2>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; font-weight: 600;">SMK Bhumi Phala Parakan</p>
+            <h2 style="color: var(--primary-dark); font-weight: 800; font-size: 1.3rem;">MIPHA KU</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; font-weight: 600;">Portal Digital X DKV F · SMK Bhumi Phala</p>
           </div>
 
           <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
@@ -1462,7 +1462,7 @@ const AppState = {
           </form>
 
           <div style="margin-top: 1rem; text-align: center; font-size: 0.78rem; color: var(--text-muted); border-top: 1px solid var(--border-light); padding-top: 1rem;">
-            MIPHA Companion v1.0 RC5 · Production Edition<br>Radius Dua Kampus: <b>100 Meter</b> | Jam Masuk: <b>07.00 WIB</b>
+            MIPHA KU · Portal Kelas X DKV F<br>Radius dua kampus: <b>100 meter</b> · Jam masuk: <b>07.00 WIB</b>
           </div>
         </div>
       </div>
@@ -1545,12 +1545,12 @@ const AppState = {
       </div>
 
       <div class="card" style="border-left:4px solid var(--accent-magenta);">
-        <div class="card-header-flex"><div class="card-title">🎒 My School Day</div><button class="btn btn-secondary" data-view="student_profile">Complete Profile</button></div>
+        <div class="card-header-flex"><div class="card-title">🎒 Aktivitas Sekolahku</div><button class="btn btn-secondary" data-view="student_profile">Lengkapi Profil</button></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;font-size:.85rem;">
-          <div><b>📚 Assignments</b><br>${this.assignments.length} active</div>
-          <div><b>🏆 Achievements</b><br>${(student.achievements||[]).length} recorded</div>
-          <div><b>📍 Home Location</b><br>${student.homeLat ? '✅ Registered' : '⚠️ Not registered'}</div>
-          <div><b>📢 Announcements</b><br>${this.announcements.length} available</div>
+          <div><b>📚 Tugas</b><br>${this.assignments.length} aktif</div>
+          <div><b>🏆 Prestasi</b><br>${(student.achievements||[]).length} tercatat</div>
+          <div><b>📍 Lokasi Rumah</b><br>${student.homeLat ? '✅ Terdaftar' : '⚠️ Belum terdaftar'}</div>
+          <div><b>📢 Pengumuman</b><br>${this.announcements.length} tersedia</div>
         </div>
       </div>
 
@@ -1662,8 +1662,8 @@ const AppState = {
     return `
       <div class="welcome-banner" style="background: linear-gradient(135deg, var(--primary-dark) 0%, var(--accent-magenta) 100%);">
         <span class="banner-role">Wali Kelas X DKV F</span>
-        <h2 style="font-size: 1.35rem; font-weight: 800;">Welcome back, ${this.teacherProfile.name} 👋</h2>
-        <p style="font-size: 0.88rem; opacity: 0.95; margin-top: 4px; font-weight: 500;">Your teacher workspace for attendance, student support, assignments, and home visits.</p>
+        <h2 style="font-size: 1.35rem; font-weight: 800;">Selamat datang, ${this.teacherProfile.name} 👋</h2>
+        <p style="font-size: 0.88rem; opacity: 0.95; margin-top: 4px; font-weight: 500;">Ruang kerja wali kelas untuk presensi, pendampingan siswa, tugas, nilai, dan home visit.</p>
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem;">
