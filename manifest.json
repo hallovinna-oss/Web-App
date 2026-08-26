@@ -1,6 +1,6 @@
 {
-  "name": "MIPHA COMPANION — SMK Bhumi Phala Parakan",
-  "short_name": "MIPHA",
+  "name": "MIPHA KU — SMK Bhumi Phala Parakan",
+  "short_name": "MIPHA KU",
   "description": "Aplikasi pendamping kelas X DKV F dengan sinkronisasi Firebase",
   "start_url": "./index.html",
   "display": "standalone",
