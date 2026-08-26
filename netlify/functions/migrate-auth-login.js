@@ -30,6 +30,82 @@ async function verifyFirebase(email, password) {
   return result;
 }
 
+function decodeFirestoreValue(value = {}) {
+  if ('nullValue' in value) return null;
+  if ('stringValue' in value) return value.stringValue;
+  if ('booleanValue' in value) return value.booleanValue;
+  if ('integerValue' in value) return Number(value.integerValue);
+  if ('doubleValue' in value) return Number(value.doubleValue);
+  if ('timestampValue' in value) return value.timestampValue;
+  if ('referenceValue' in value) return value.referenceValue;
+  if ('geoPointValue' in value) return value.geoPointValue;
+  if ('bytesValue' in value) return value.bytesValue;
+  if ('arrayValue' in value) return (value.arrayValue.values || []).map(decodeFirestoreValue);
+  if ('mapValue' in value) return decodeFirestoreFields(value.mapValue.fields || {});
+  return null;
+}
+
+function decodeFirestoreFields(fields = {}) {
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, decodeFirestoreValue(value)]));
+}
+
+async function readFirebaseCollection(collection, idToken) {
+  const rows = [];
+  let pageToken = '';
+  do {
+    const target = new URL(`https://firestore.googleapis.com/v1/projects/mipha-companion/databases/(default)/documents/${encodeURIComponent(collection)}`);
+    target.searchParams.set('pageSize', '300');
+    if (pageToken) target.searchParams.set('pageToken', pageToken);
+    const response = await fetch(target, { headers: { Authorization: `Bearer ${idToken}` } });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(`Data ${collection} tidak dapat dibaca dari Firebase.`), { statusCode: 502 });
+    for (const document of result.documents || []) {
+      rows.push({ id: String(document.name || '').split('/').pop(), data: decodeFirestoreFields(document.fields || {}) });
+    }
+    pageToken = result.nextPageToken || '';
+  } while (pageToken);
+  return rows;
+}
+
+function ownerFor(collection, data) {
+  if (collection === 'students') return data.id || data.studentId || null;
+  return data.studentId || data.ownerId || null;
+}
+
+async function upsertAppRecords(rows) {
+  for (let index = 0; index < rows.length; index += 200) {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/app_records?on_conflict=collection,record_id`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SECRET_KEY,
+        Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+        'content-type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(rows.slice(index, index + 200))
+    });
+    if (!response.ok) throw Object.assign(new Error('Data aplikasi tidak dapat disimpan ke Supabase.'), { statusCode: 502 });
+  }
+}
+
+async function migrateFirebaseData(idToken) {
+  const collections = ['attendance', 'leaveRequests', 'students', 'assignments', 'assignmentSubmissions', 'gradeReports', 'homeVisits', 'announcements', 'settings'];
+  const counts = {};
+  for (const collection of collections) {
+    const documents = await readFirebaseCollection(collection, idToken);
+    const rows = documents.map(document => ({
+      collection,
+      record_id: document.id,
+      owner_id: ownerFor(collection, document.data),
+      record_date: document.data.date || null,
+      data: document.data
+    }));
+    if (rows.length) await upsertAppRecords(rows);
+    counts[collection] = rows.length;
+  }
+  return counts;
+}
+
 async function supabaseAdmin(path, options = {}) {
   if (!SUPABASE_SECRET_KEY) throw Object.assign(new Error('Migrasi login belum diaktifkan pada server.'), { statusCode: 503 });
   const response = await fetch(`${SUPABASE_URL}/auth/v1/admin${path}`, {
@@ -90,7 +166,7 @@ exports.handler = async event => {
 
     const email = emailFor(username, role);
     const realPassword = passwordFor(username, password, role);
-    await verifyFirebase(email, realPassword);
+    const firebaseUser = await verifyFirebase(email, realPassword);
 
     let user = await findSupabaseUser(email);
     if (user) {
@@ -105,10 +181,11 @@ exports.handler = async event => {
       });
     }
     await upsertProfile(user, username, role, input.student);
-    return json(200, { success: true });
+    const migrated = role === 'guru' ? await migrateFirebaseData(firebaseUser.idToken) : null;
+    return json(200, { success: true, migrated });
   } catch (error) {
     return json(error.statusCode || 500, { error: error.message || 'Migrasi login gagal.' });
   }
 };
 
-exports._test = { emailFor, passwordFor };
+exports._test = { emailFor, passwordFor, decodeFirestoreValue, decodeFirestoreFields, ownerFor };
