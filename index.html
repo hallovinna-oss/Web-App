@@ -31,10 +31,11 @@
     <div class="splash-orb splash-orb-b"></div>
     <div class="splash-content">
       <div class="splash-mark"><img class="splash-logo" src="./logo.png" alt="SMK Bhumi Phala" loading="lazy"></div>
-      <div class="splash-divider"></div>
+      <span class="splash-eyebrow">PORTAL KELAS X DKV F</span>
       <h1>MIPHA KU</h1>
       <p>Belajar · Bertumbuh · Terhubung</p>
-      <span>Portal Digital Kelas X DKV F</span>
+      <div class="splash-loader" aria-hidden="true"><i></i></div>
+      <span class="splash-school">SMK Bhumi Phala · Parakan</span>
     </div>
   </div>
   <div id="app-container">
@@ -47,8 +48,8 @@
       document.documentElement.dataset.theme = 'light';
       document.documentElement.dataset.themePreference = 'light';
       window.addEventListener('load', () => {
-        window.setTimeout(() => document.getElementById('mipha-splash')?.classList.add('splash-exit'), 3200);
-        window.setTimeout(() => document.getElementById('mipha-splash')?.remove(), 3900);
+        window.setTimeout(() => document.getElementById('mipha-splash')?.classList.add('splash-exit'), 1150);
+        window.setTimeout(() => document.getElementById('mipha-splash')?.remove(), 1650);
       });
     })();
   </script>
