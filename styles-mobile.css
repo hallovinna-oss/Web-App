@@ -48,3 +48,26 @@ img { max-width: 100%; height: auto; display: block; }
   border-radius: 22px;
   padding-bottom: .45rem;
 }
+
+/* Reference-aligned liquid glass mobile shell. */
+.app-header {
+  top: .55rem;
+  width: calc(100% - 1.1rem);
+  border-radius: 22px;
+}
+.main-content { padding-top: 1.55rem; }
+.card,.action-card,.mipha-module,.table-responsive {
+  background: linear-gradient(145deg, rgba(255,255,255,.76), rgba(249,248,255,.48));
+  border-color: rgba(255,255,255,.92);
+  border-radius: 22px;
+  box-shadow: 0 18px 42px rgba(68,55,104,.11), inset 0 1px 0 #fff;
+}
+.welcome-banner { min-height: 166px; }
+.welcome-banner::before { width: 122px; height: 122px; right: -12px; top: -22px; }
+.bottom-nav {
+  background: linear-gradient(155deg, rgba(255,255,255,.78), rgba(246,243,252,.54));
+  -webkit-backdrop-filter: blur(30px) saturate(165%);
+  backdrop-filter: blur(30px) saturate(165%);
+  box-shadow: 0 20px 46px rgba(65,52,99,.16), inset 0 1px 0 #fff;
+}
+.login-card { border-radius: 30px; }
