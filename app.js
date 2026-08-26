@@ -1449,7 +1449,7 @@ const AppState = {
                 <img src="./logo.png" alt="SMK Bhumi Phala">
               </div>
               <div class="login-brand-copy">
-                <span class="login-eyebrow">PORTAL KELAS X DKV F</span>
+                <span class="login-eyebrow">PORTAL KELAS MIPHA</span>
                 <h2>MIPHA KU</h2>
                 <p>Ruang digital kelas untuk belajar, hadir, dan berkembang bersama.</p>
               </div>
