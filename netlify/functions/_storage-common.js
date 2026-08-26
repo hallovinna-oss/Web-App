@@ -1,5 +1,5 @@
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://cyhlrhbjidvjcquveadu.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_9MyZ4MUylJjcaHTat-7FeQ_rbUJxBI5';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://vptvntgijeegognwuqzm.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_bR1BqSLLTJQPuIrJsn2SEw_2RE0ceAO';
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(body) };

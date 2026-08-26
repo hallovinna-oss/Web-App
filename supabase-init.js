@@ -1,6 +1,6 @@
 /* MIPHA COMPANION — Supabase bridge (Auth + PostgreSQL Realtime + private file gateway) */
-const supabaseUrl = 'https://cyhlrhbjidvjcquveadu.supabase.co';
-const supabasePublishableKey = 'sb_publishable_9MyZ4MUylJjcaHTat-7FeQ_rbUJxBI5';
+const supabaseUrl = 'https://vptvntgijeegognwuqzm.supabase.co';
+const supabasePublishableKey = 'sb_publishable_bR1BqSLLTJQPuIrJsn2SEw_2RE0ceAO';
 const supabaseClient = window.supabase.createClient(supabaseUrl, supabasePublishableKey, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
 });
@@ -119,6 +119,21 @@ const SupabaseBackend = {
     const email = this.emailFor(username, role);
     const realPassword = this.passwordFor(username, password, role);
     let result = await supabaseClient.auth.signInWithPassword({ email, password: realPassword });
+    if (result.error) {
+      const student = localStudents.find(item => String(item.nis) === String(username));
+      if (/invalid login credentials/i.test(result.error.message)) {
+        const migration = await fetch('/.netlify/functions/migrate-auth-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: String(username), password: String(password), role, student: role === 'siswa' ? student : undefined })
+        });
+        if (migration.ok) result = await supabaseClient.auth.signInWithPassword({ email, password: realPassword });
+        else if (role === 'guru') {
+          const detail = await migration.json().catch(() => ({}));
+          throw new Error(detail.error || 'Akun guru belum dapat dimigrasikan.');
+        }
+      }
+    }
     if (result.error) {
       const student = localStudents.find(item => String(item.nis) === String(username));
       const canBootstrap = role === 'siswa' && student && String(password) === String(username);
