@@ -53,13 +53,11 @@
     })();
   </script>
 
-  <!-- Firebase SDK (Auth + Firestore). Files use private Nextcloud storage. -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <!-- Supabase SDK (Auth + PostgreSQL Realtime). Files use private Nextcloud storage. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- RC4 uses one browser runtime. The duplicate /src module prototype is kept
        as reference only and must not run alongside these compatibility scripts. -->
-  <script src="./firebase-init.js?v=rc5"></script>
+  <script src="./supabase-init.js?v=sb1"></script>
   <script src="./config.js?v=rc5"></script>
   <script src="./lib/geo-utils.js?v=rc5"></script>
   <script src="./attendance-engine.js?v=rc5"></script>

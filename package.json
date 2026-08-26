@@ -1,7 +1,7 @@
 {
   "scripts": {
     "test": "node tools/test-geo-utils.js && node tools/test-moncer-integration.js",
-    "check": "node --check app.js && node --check firebase-init.js && node --check attendance-engine.js && node --check sw.js && node --check netlify/functions/_storage-common.js && node --check netlify/functions/storage-upload.js && node --check netlify/functions/storage-download.js",
+    "check": "node --check app.js && node --check supabase-init.js && node --check attendance-engine.js && node --check sw.js && node --check netlify/functions/_storage-common.js && node --check netlify/functions/storage-upload.js && node --check netlify/functions/storage-download.js && node --check netlify/functions/moncer-attendance.js",
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android",
     "android:apk": "cd android && gradlew.bat assembleDebug"

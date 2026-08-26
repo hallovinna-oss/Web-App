@@ -1,4 +1,4 @@
-const { json, requireFirebaseUser } = require('./_storage-common');
+const { json, requireSupabaseUser } = require('./_storage-common');
 
 const CAMPUSES = [
   { id: 'campus_1', lat: -7.281462945129072, lng: 110.09827607588974, radiusMeters: 100 },
@@ -29,7 +29,7 @@ function resolveAttendanceCode(lookupResult, nis) {
 exports.handler = async event => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
-    const user = await requireFirebaseUser(event);
+    const user = await requireSupabaseUser(event);
     const input = JSON.parse(event.body || '{}');
     const nis = String(input.nis || '').trim();
     const method = input.method === 'nis' ? 'nis' : 'gps';

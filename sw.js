@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mipha-companion-rc5-network-first-v4';
+const CACHE_NAME = 'mipha-companion-supabase-preview-v1';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -6,7 +6,7 @@ const ASSETS_TO_CACHE = [
   './theme-light.css?v=rc5',
   './app.js?v=rc5',
   './styles-mobile.css',
-  './firebase-init.js?v=rc5',
+  './supabase-init.js?v=sb1',
   './attendance-engine.js?v=rc5',
   './config.js?v=rc5',
   './manifest.json',
@@ -44,7 +44,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   const isCoreAppRequest = event.request.mode === 'navigate' ||
-    ['/', '/index.html', '/app.js', '/config.js', '/firebase-init.js', '/attendance-engine.js', '/styles.css', '/theme-light.css', '/styles-mobile.css', '/sw.js'].includes(url.pathname);
+    ['/', '/index.html', '/app.js', '/config.js', '/supabase-init.js', '/attendance-engine.js', '/styles.css', '/theme-light.css', '/styles-mobile.css', '/sw.js'].includes(url.pathname);
 
   if (isCoreAppRequest) {
     event.respondWith(
