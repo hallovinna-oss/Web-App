@@ -46,6 +46,16 @@ as $$ select exists(
 alter table public.profiles enable row level security;
 alter table public.app_records enable row level security;
 
+-- Tables created through the SQL editor do not always inherit Data API grants.
+-- RLS remains the authorization layer; these grants only make the policies reachable.
+grant usage on schema public to authenticated, service_role;
+grant select, insert, update on table public.profiles to authenticated;
+grant select, insert, update, delete on table public.app_records to authenticated;
+grant all privileges on table public.profiles, public.app_records to service_role;
+grant execute on function public.is_teacher() to authenticated, service_role;
+grant execute on function public.my_student_id() to authenticated, service_role;
+grant execute on function public.valid_student_claim(text, text) to authenticated, service_role;
+
 drop policy if exists profiles_read on public.profiles;
 create policy profiles_read on public.profiles for select to authenticated
 using (uid = auth.uid() or public.is_teacher());
