@@ -999,6 +999,17 @@ const AppState = {
   },
 
   switchView(viewName) {
+    const dock = document.querySelector('.bottom-nav');
+    const nextButton = dock?.querySelector(`[data-view="${viewName}"]`);
+    if (dock && nextButton && viewName !== this.activeView) {
+      const buttons = [...dock.querySelectorAll('.nav-item')];
+      buttons.forEach(button => button.classList.toggle('active', button === nextButton));
+      dock.style.setProperty('--nav-active', String(buttons.indexOf(nextButton)));
+      this.activeView = viewName;
+      clearTimeout(this._navTransitionTimer);
+      this._navTransitionTimer = setTimeout(() => this.render(), 260);
+      return;
+    }
     this.activeView = viewName;
     this.render();
   },
@@ -1417,7 +1428,7 @@ const AppState = {
     ];
 
     return `
-      <nav class="bottom-nav">
+      <nav class="bottom-nav" style="--nav-count:${items.length};--nav-active:${Math.max(0, items.findIndex(item => item.view === this.activeView))}">
         ${items.map(item => `
           <button class="nav-item ${this.activeView === item.view ? 'active' : ''}" data-view="${item.view}">
             <span class="nav-icon">${item.icon}</span>

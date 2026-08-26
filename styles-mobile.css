@@ -70,4 +70,12 @@ img { max-width: 100%; height: auto; display: block; }
   backdrop-filter: blur(30px) saturate(165%);
   box-shadow: 0 20px 46px rgba(65,52,99,.16), inset 0 1px 0 #fff;
 }
+.bottom-nav::before {
+  left: .35rem;
+  width: calc((100% - .7rem) / var(--nav-count));
+  height: calc(100% + 14px);
+  border-radius: 21px;
+}
+.bottom-nav .nav-item { gap: .1rem; }
+.bottom-nav .nav-item > span:last-child { font-size: .6rem; line-height: 1; }
 .login-card { border-radius: 30px; }
