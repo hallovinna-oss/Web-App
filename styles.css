@@ -1271,7 +1271,12 @@ body {
 
 @media (min-width: 1024px) {
   .app-header { width: min(1320px, calc(100% - 3rem)); }
-  .main-content { margin-left: 246px; width: calc(100% - 246px); padding-top: 2.5rem; }
+  .main-content {
+    margin: 0 1.5rem 0 calc(max(1.5rem, (100vw - 1320px) / 2) + 230px) !important;
+    width: auto !important;
+    max-width: none !important;
+    padding: 2.5rem 0 6.5rem !important;
+  }
   .bottom-nav {
     top: 98px;
     bottom: 1.25rem;
@@ -1281,4 +1286,7 @@ body {
     border-radius: 28px;
     padding: 1rem .72rem;
   }
+  .welcome-banner,
+  .card,
+  .table-responsive { min-width: 0; }
 }
