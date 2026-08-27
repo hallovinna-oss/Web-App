@@ -207,6 +207,11 @@ const SupabaseBackend = {
 
   async seedStudents(students) { await Promise.all(students.map(student => { const clean = this.clean({ ...student }); delete clean.password; delete clean.pin; return this.upsertRecord('students', student.id, clean); })); },
 
+  async deleteRecord(collection, id) {
+    const result = await supabaseClient.from('app_records').delete().eq('collection', collection).eq('record_id', String(id));
+    if (result.error) throw result.error;
+  },
+
   async syncState(state) {
     if (!authFacade.currentUser || state.currentUser?.role !== 'guru') return;
     const writes = [];
@@ -220,6 +225,7 @@ const SupabaseBackend = {
   },
 
   async writeAttendanceRecord(studentId, dateKey, status, student) {
+    if (status === 'no_record' || status === 'belum_checkin' || !status) return this.deleteRecord('attendance', `${dateKey}_${studentId}`);
     const validStatus = this.normalizeAttendanceStatus(status); if (!validStatus) throw new Error('Status absensi tidak valid.');
     return this.upsertRecord('attendance', `${dateKey}_${studentId}`, { ...this.clean(student || {}), studentId, date: dateKey, status: validStatus }, dateKey);
   },
