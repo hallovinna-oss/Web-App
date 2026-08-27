@@ -973,7 +973,7 @@ const AppState = {
   },
 
   setupListeners() {
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', async (e) => {
       let target = e.target;
       if (target.nodeType !== Node.ELEMENT_NODE) target = target.parentElement;
       if (!target) return;
@@ -992,8 +992,17 @@ const AppState = {
         const studentId = cell.dataset.studentId;
         const date = cell.dataset.date;
         if (!studentId || !date) return;
-        this.toggleMonthlyAttendanceStatus(studentId, date);
-        this.render();
+        cell.style.opacity = '0.55';
+        cell.style.pointerEvents = 'none';
+        try {
+          await this.toggleMonthlyAttendanceStatus(studentId, date);
+          this.render();
+        } catch (error) {
+          console.error('Attendance update failed:', error);
+          cell.style.opacity = '';
+          cell.style.pointerEvents = '';
+          alert(`Perubahan belum tersimpan: ${error.message || 'Koneksi database gagal.'}`);
+        }
       }
     });
   },
@@ -1069,23 +1078,21 @@ const AppState = {
     return { success: true, time: timeString };
   },
 
-  updateAttendanceRecord(studentId, updates) {
+  async updateAttendanceRecord(studentId, updates) {
     if (!studentId || !this.students.find((s) => s.id === studentId)) return;
     const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
     const existing = this.attendance[studentId] || {};
-    this.attendance[studentId] = {
-      ...existing,
-      ...updates
-    };
+    const nextRecord = { ...existing, ...updates, studentId, date: todayDate, source: 'teacher_manual_edit' };
+    if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) throw new Error('Login Supabase diperlukan agar perubahan tersimpan permanen.');
+    await SupabaseBackend.writeAttendanceRecord(studentId, todayDate, nextRecord.status, nextRecord);
+    if (nextRecord.status === 'belum_checkin' || nextRecord.status === 'no_record') delete this.attendance[studentId];
+    else this.attendance[studentId] = nextRecord;
     this.recordMonthlyAttendanceForDate(todayDate, this.attendance);
     this.logAudit(`Manual edit attendance for ${this.students.find((s) => s.id === studentId).name}`);
     this.saveState();
-    if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
-      SupabaseBackend.writeAttendanceRecord(studentId, todayDate, this.attendance[studentId].status, this.attendance[studentId]).catch(error => console.warn('Cloud sync failed:', error));
-    }
   },
 
-  toggleMonthlyAttendanceStatus(studentId, date) {
+  async toggleMonthlyAttendanceStatus(studentId, date) {
     if (!this.currentUser || this.currentUser.role !== 'guru') return;
     if (!this.students.find((s) => s.id === studentId)) return;
     const currentStatus = this.attendanceStatusForDate(studentId, date);
@@ -1093,19 +1100,28 @@ const AppState = {
     const currentIndex = cycle.indexOf(currentStatus);
     const normalizedIndex = currentIndex === -1 ? 0 : currentIndex;
     const nextStatus = cycle[(normalizedIndex + 1) % cycle.length];
+    if (!window.SupabaseBackend || !SupabaseBackend.auth.currentUser) throw new Error('Login Supabase diperlukan agar perubahan tersimpan permanen.');
+    const dateKey = this.formatDateKey(date);
+    await SupabaseBackend.writeAttendanceRecord(studentId, dateKey, nextStatus, this.students.find((s) => s.id === studentId));
     this.setAttendanceStatusForDate(studentId, date, nextStatus);
-    this.saveState();
-    if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
-      SupabaseBackend.writeAttendanceRecord(studentId, this.formatDateKey(date), nextStatus, this.students.find((s) => s.id === studentId)).catch(error => console.warn('Cloud sync failed:', error));
+    if (dateKey === (this.attendanceDate || this.getTodayKey())) {
+      if (nextStatus === 'no_record') delete this.attendance[studentId];
+      else this.attendance[studentId] = { ...(this.attendance[studentId] || {}), studentId, date: dateKey, status: nextStatus, source: 'teacher_manual_edit' };
     }
+    this.saveState();
   },
 
   setAttendanceStatusForDate(studentId, date, status) {
     const dateKey = this.formatDateKey(date);
     if (!this.historicalAttendance[studentId]) this.historicalAttendance[studentId] = {};
-    this.historicalAttendance[studentId][dateKey] = status;
     if (!this.monthlyAttendance[studentId]) this.monthlyAttendance[studentId] = {};
-    this.monthlyAttendance[studentId][dateKey] = status;
+    if (status === 'no_record' || status === 'belum_checkin') {
+      delete this.historicalAttendance[studentId][dateKey];
+      delete this.monthlyAttendance[studentId][dateKey];
+    } else {
+      this.historicalAttendance[studentId][dateKey] = status;
+      this.monthlyAttendance[studentId][dateKey] = status;
+    }
     localStorage.setItem('dkvf_historical_attendance', JSON.stringify(this.historicalAttendance));
     localStorage.setItem('dkvf_monthly_attendance', JSON.stringify(this.monthlyAttendance));
   },
@@ -2049,6 +2065,7 @@ const AppState = {
               ${[2025,2026,2027].map(y => `<option value="${y}" ${y===selYear?'selected':''}>${y}</option>`).join('')}
             </select>
             <button class="btn btn-primary" id="btn-matrix-refresh" style="padding:0.35rem 0.75rem;font-size:0.82rem;">🔄 Tampilkan</button>
+            <button class="btn btn-primary" id="btn-matrix-export-xlsx" style="padding:0.35rem 0.75rem;font-size:0.82rem;">⬇️ Unduh Bulan Ini</button>
           </div>
         </div>
       </div>
@@ -2487,12 +2504,19 @@ const AppState = {
   },
 
   renderReportsView() {
+    const now = new Date();
+    const selectedMonth = this.matrixMonth !== undefined ? this.matrixMonth : now.getMonth();
+    const selectedYear = this.matrixYear || now.getFullYear();
+    const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
     return `
       <div class="card">
-        <div class="card-title">📥 Rekap & Laporan Presensi Harian</div>
+        <div class="card-title">📥 Unduh Rekap Presensi Bulanan</div>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.8rem;">Pilih bulan, lalu unduh seluruh kehadiran siswa dari database utama.</p>
         <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; align-items: center;">
-          <button class="btn btn-primary" id="btn-export-csv">📄 Unduh Rekap (CSV)</button>
-          <button class="btn btn-primary" id="btn-export-xlsx">📄 Unduh Rekap (XLSX)</button>
+          <select id="report-month" class="form-select" style="width:auto;">${monthNames.map((name,index) => `<option value="${index}" ${index === selectedMonth ? 'selected' : ''}>${name}</option>`).join('')}</select>
+          <select id="report-year" class="form-select" style="width:auto;">${[2025,2026,2027,2028].map(year => `<option value="${year}" ${year === selectedYear ? 'selected' : ''}>${year}</option>`).join('')}</select>
+          <button class="btn btn-primary" id="btn-export-csv">📄 Unduh Bulanan (CSV)</button>
+          <button class="btn btn-primary" id="btn-export-xlsx">📊 Unduh Bulanan (XLSX)</button>
           <button class="btn btn-secondary" id="btn-import-csv">📥 Import Data Presensi</button>
           <button class="btn btn-secondary" onclick="window.print()">🖨️ Cetak / Save PDF</button>
           <input id="import-csv-input" type="file" accept=".csv,.xlsx,.xls" style="display:none" />
@@ -3058,7 +3082,7 @@ const AppState = {
     }
     const formEditAttendance = document.getElementById('form-edit-attendance');
     if (formEditAttendance) {
-      formEditAttendance.addEventListener('submit', (e) => {
+      formEditAttendance.addEventListener('submit', async (e) => {
         e.preventDefault();
         e.stopPropagation();
         const studentId = this.selectedAttendanceEditStudentId;
@@ -3071,18 +3095,26 @@ const AppState = {
         const checkoutTime = document.getElementById('edit-attendance-checkout').value.trim();
         const homeConfirmed = !!document.getElementById('edit-attendance-home-confirmed').checked;
         const homeArrivalTime = document.getElementById('edit-attendance-home-arrival').value.trim();
-        this.updateAttendanceRecord(studentId, {
-          status,
-          checkinTime: checkinTime || null,
-          checkinMethod: checkinMethod || null,
-          distanceMeters,
-          campusName: campusName || null,
-          checkoutTime: checkoutTime || null,
-          homeConfirmed,
-          homeArrivalTime: homeConfirmed ? (homeArrivalTime || null) : null
-        });
-        this.selectedAttendanceEditStudentId = null;
-        this.render();
+        const submitButton = formEditAttendance.querySelector('button[type="submit"]');
+        if (submitButton) { submitButton.disabled = true; submitButton.textContent = 'Menyimpan ke database...'; }
+        try {
+          await this.updateAttendanceRecord(studentId, {
+            status,
+            checkinTime: checkinTime || null,
+            checkinMethod: checkinMethod || null,
+            distanceMeters,
+            campusName: campusName || null,
+            checkoutTime: checkoutTime || null,
+            homeConfirmed,
+            homeArrivalTime: homeConfirmed ? (homeArrivalTime || null) : null
+          });
+          this.selectedAttendanceEditStudentId = null;
+          this.render();
+        } catch (error) {
+          console.error('Attendance update failed:', error);
+          if (submitButton) { submitButton.disabled = false; submitButton.textContent = '💾 Simpan Perubahan'; }
+          alert(`Perubahan belum tersimpan: ${error.message || 'Koneksi database gagal.'}`);
+        }
       });
     }
 
@@ -3131,9 +3163,17 @@ const AppState = {
     if (gradeSemester) gradeSemester.onchange = () => { this.selectedGradeSemester = gradeSemester.value; this.render({ silent: true }); };
 
     const btnExportCSV = document.getElementById('btn-export-csv');
-    if (btnExportCSV) btnExportCSV.onclick = () => this.exportCSV();
+    const applyReportPeriod = () => {
+      const month = document.getElementById('report-month');
+      const year = document.getElementById('report-year');
+      if (month) this.matrixMonth = Number(month.value);
+      if (year) this.matrixYear = Number(year.value);
+    };
+    if (btnExportCSV) btnExportCSV.onclick = () => { applyReportPeriod(); this.exportCSV(); };
     const btnExportXLSX = document.getElementById('btn-export-xlsx');
-    if (btnExportXLSX) btnExportXLSX.onclick = () => this.exportOfficialAttendanceXLSX();
+    if (btnExportXLSX) btnExportXLSX.onclick = () => { applyReportPeriod(); this.exportOfficialAttendanceXLSX(); };
+    const btnMatrixExportXLSX = document.getElementById('btn-matrix-export-xlsx');
+    if (btnMatrixExportXLSX) btnMatrixExportXLSX.onclick = () => this.exportOfficialAttendanceXLSX();
 
     const btnImportCsv = document.getElementById('btn-import-csv');
     const importCsvInput = document.getElementById('import-csv-input');
@@ -3177,21 +3217,32 @@ const AppState = {
   },
 
   exportCSV() {
-    let csv = "No,NIS,Nama Siswa,Kelas,Status,Jam Checkin,Campus,Jarak GPS (m),Check-out,Sampai Rumah\n";
-    this.students.forEach((st, idx) => {
-      const a = this.attendance[st.id] || {};
-      const campus = a.campusName || '-';
-      csv += `"${idx + 1}","${st.nis || '-'}","${st.name}","${st.class}","${a.status || 'BELUM_CHECKIN'}","${a.checkinTime || '-'}","${campus}","${a.distanceMeters || '-'}","${a.checkoutTime || '-'}","${a.homeConfirmed ? 'YA' : 'BELUM'}"\n`;
+    const now = new Date();
+    const year = this.matrixYear || now.getFullYear();
+    const month = this.matrixMonth !== undefined ? this.matrixMonth : now.getMonth();
+    const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    const { matrix, daysInMonth } = this.getMonthMatrix(year, month);
+    const dayHeaders = Array.from({ length: daysInMonth }, (_, index) => `Tanggal ${index + 1}`);
+    let csv = `"REKAP ABSENSI BULAN ${monthNames[month].toUpperCase()} ${year}"\n`;
+    csv += `"Kelas","X DKV F"\n"Bulan","${monthNames[month]}"\n"Tahun","${year}"\n\n`;
+    csv += ['No','NIS','Nama Siswa','Kelas',...dayHeaders,'Hadir','Sakit','Izin','Alpha','Persentase Kehadiran'].map(value => `"${value}"`).join(',') + '\n';
+    const label = { tepat_waktu: 'H', sakit: 'S', izin: 'I', alpha: 'A' };
+    matrix.forEach((row, idx) => {
+      const values = [idx + 1, row.student.nis || '-', row.student.name, row.student.class || 'X DKV F'];
+      row.days.forEach(day => values.push(day.isSchoolDay ? (label[day.status] || '') : '-'));
+      values.push(row.countH, row.countS, row.countI, row.countA, `${row.pct}%`);
+      csv += values.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',') + '\n';
     });
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const netlifylink = document.createElement('a');
+    const link = document.createElement('a');
     link.href = url;
-    link.download = `Rekap_Presensi_X_DKV_F_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `Rekap_Absensi_X_DKV_F_${monthNames[month]}_${year}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   },
 
   async loadExcelJSLibrary() {
@@ -3222,6 +3273,7 @@ const AppState = {
       const now = new Date();
       const selYear = this.matrixYear || now.getFullYear();
       const selMonth = this.matrixMonth !== undefined ? this.matrixMonth : now.getMonth();
+      const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
       const academicYear = this.getAcademicYearLabel(selYear, selMonth);
       const reportClass = this.students.length ? this.students[0].class || 'X DKV F' : 'X DKV F';
       const teacherName = this.teacherProfile.name || 'Wali Kelas';
@@ -3262,13 +3314,13 @@ const AppState = {
 
       const titleRange = `A1:${sheet.getColumn(columns.length).letter}1`;
       sheet.mergeCells(titleRange);
-      sheet.getCell('A1').value = `Absensi Kelas ${reportClass}`;
+      sheet.getCell('A1').value = `Absensi Kelas ${reportClass} — Bulan ${MONTH_NAMES[selMonth]} ${selYear}`;
       sheet.getCell('A1').font = { size: 14, bold: true };
       sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
 
       const schoolRow = `A2:${sheet.getColumn(columns.length).letter}2`;
       sheet.mergeCells(schoolRow);
-      sheet.getCell('A2').value = 'SMK Bhumi Phala Parakan';
+      sheet.getCell('A2').value = `SMK Bhumi Phala Parakan — Rekap Bulan ${MONTH_NAMES[selMonth]} ${selYear}`;
       sheet.getCell('A2').font = { size: 12, bold: true };
       sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -3298,7 +3350,6 @@ const AppState = {
         };
       });
 
-      const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
       const { matrix, daysInMonth } = this.getMonthMatrix(selYear, selMonth);
       const legendBorder = {
         top: { style: 'thin', color: { argb: 'FFBDBDBD' } },
@@ -3341,7 +3392,7 @@ const AppState = {
             rowValues.push(dayInfo.status === 'weekend' || dayInfo.status === 'future' || dayInfo.status === 'before_start' ? '-' : '');
           } else {
             switch (dayInfo.status) {
-              case 'tepat_waktu':
+              case 'tepat_waktu': rowValues.push('H'); break;
               case 'sakit': rowValues.push('S'); break;
               case 'izin': rowValues.push('I'); break;
               case 'alpha': rowValues.push('A'); break;
