@@ -22,7 +22,7 @@ async function testHandler() {
   process.env.MONCER_API_KEY = 'test-only';
   process.env.MONCER_API_BASE_URL = 'https://absen.mipha.sch.id/api.php';
   try {
-    for (const scenario of ['existing', 'new', 'html', 'ambiguous', 'wrong-date']) {
+    for (const scenario of ['existing', 'new', 'json-404', 'html', 'ambiguous', 'wrong-date', 'unrelated-404']) {
       let posts = 0;
       global.fetch = async (url, options = {}) => {
         if (String(url).includes('/auth/v1/user')) return { ok: true, json: async () => ({ id: 'test-user', email: '6289@mipha-companion.local' }) };
@@ -37,12 +37,16 @@ async function testHandler() {
           posts++; return { ok: true, status: 200, json: async () => ({ success: true }) };
         }
         assert.strictEqual(new URL(url).searchParams.get('uid'), '6289');
-        if (!posts && scenario !== 'existing') return { ok: scenario === 'ambiguous', status: scenario === 'ambiguous' ? 200 : 404, json: async () => ({ success: false }) };
+        if (!posts && scenario !== 'existing') return {
+          ok: ['ambiguous', 'json-404'].includes(scenario),
+          status: ['ambiguous', 'json-404'].includes(scenario) ? 200 : 404,
+          json: async () => ({ success: false, ...(['ambiguous', 'unrelated-404'].includes(scenario) ? {} : { code: 404, data: null }) })
+        };
         return { ok: true, status: 200, json: async () => ({ ...arrival, data: { ...arrival.data, kode_absen: '6289', tanggal: scenario === 'wrong-date' ? '2020-01-01' : _test.jakartaDate() } }) };
       };
       const response = await handler({ httpMethod: 'POST', headers: { authorization: 'Bearer test' }, body: JSON.stringify({ nis: '6289', method: 'nis' }) });
-      assert.strictEqual(response.statusCode, ['existing', 'new'].includes(scenario) ? 200 : 502, scenario);
-      assert.strictEqual(posts, ['new', 'wrong-date'].includes(scenario) ? 1 : 0, scenario);
+      assert.strictEqual(response.statusCode, ['existing', 'new', 'json-404'].includes(scenario) ? 200 : 502, scenario);
+      assert.strictEqual(posts, ['new', 'json-404', 'wrong-date'].includes(scenario) ? 1 : 0, scenario);
     }
     global.fetch = async url => {
       assert(String(url).includes('/auth/v1/user'), 'Invalid identity/GPS must never reach Moncer');
