@@ -92,7 +92,7 @@ const SupabaseBackend = {
   },
 
   async syncMoncerAttendance(nis, gps) {
-    const result = await this.callPrivateFunction('/.netlify/functions/moncer-attendance', { nis: String(nis || ''), method: ['nis','pin'].includes(gps.checkinMethod) ? 'nis' : 'gps', latitude: gps.latitude, longitude: gps.longitude, gpsAccuracy: gps.gpsAccuracy });
+    const result = await this.callPrivateFunction('/.netlify/functions/moncer-attendance', { nis: String(nis || ''), date: gps.date, method: ['nis','pin'].includes(gps.checkinMethod) ? 'nis' : 'gps', latitude: gps.latitude, longitude: gps.longitude, gpsAccuracy: gps.gpsAccuracy });
     if (result.success !== true || result.verified !== true) throw new Error(result.error || 'Presensi belum terverifikasi di Moncer.');
     return result;
   },
