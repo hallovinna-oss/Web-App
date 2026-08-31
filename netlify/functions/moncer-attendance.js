@@ -46,6 +46,19 @@ function verifiedArrival(result, code, date) {
     && !/^00:00(?::00)?$/.test(data.jam_datang);
 }
 
+function confirmedMissing({ response, result }) {
+  // The API also carries its outcome in JSON `code`. Never treat an
+  // arbitrary HTTP 200, empty response or success:false alone as absence.
+  return result?.success === false && Number(result?.code) === 404
+    && result?.data == null && (response.ok || response.status === 404);
+}
+
+function preflightDiagnostic({ response, result }) {
+  const apiCode = /^\d{3}$/.test(String(result?.code)) ? String(result.code) : 'tidak ada';
+  const outcome = typeof result?.success === 'boolean' ? String(result.success) : 'tidak ada';
+  return `HTTP ${response.status}; kode API ${apiCode}; success ${outcome}`;
+}
+
 exports.handler = async event => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Metode tidak diizinkan.' });
   try {
@@ -97,7 +110,7 @@ exports.handler = async event => {
     if (verifiedArrival(before.result, attendanceCode, date)) {
       return json(200, { success: true, verified: true, alreadyPresent: true, message: 'Check-in hari ini sudah terverifikasi di Moncer; tidak dikirim ulang.', data: before.result.data });
     }
-    if (before.response.status !== 404) return json(502, { error: 'Status awal presensi Moncer belum dapat dipastikan. Pengiriman dibatalkan untuk mencegah presensi ganda.' });
+    if (!confirmedMissing(before)) return json(502, { error: `Status awal presensi Moncer belum dapat dipastikan (${preflightDiagnostic(before)}). Pengiriman dibatalkan untuk mencegah presensi ganda.` });
 
     const target = new URL(baseUrl);
     target.searchParams.set('action', 'absen');
@@ -140,4 +153,4 @@ exports.handler = async event => {
   }
 };
 
-exports._test = { distanceMeters, resolveApiUrl, jakartaDate, verifiedArrival };
+exports._test = { distanceMeters, resolveApiUrl, jakartaDate, verifiedArrival, confirmedMissing };
