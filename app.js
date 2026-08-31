@@ -832,14 +832,15 @@ const AppState = {
       status = 'tepat_waktu';
     }
 
-    const distance = customDistance !== null ? customDistance : Math.floor(Math.random() * 45) + 15;
-    const latitude = campus && campus._gps && typeof campus._gps.latitude === 'number' ? campus._gps.latitude : (campus && campus.lat) || null;
-    const longitude = campus && campus._gps && typeof campus._gps.longitude === 'number' ? campus._gps.longitude : (campus && campus.lng) || null;
+    const distance = customDistance !== null ? customDistance : null;
+    const latitude = campus?._gps?.latitude ?? null;
+    const longitude = campus?._gps?.longitude ?? null;
     const gpsAccuracy = campus && campus._gps && typeof campus._gps.accuracy === 'number' ? campus._gps.accuracy : null;
     const gpsTimestamp = campus && campus._gps && campus._gps.timestamp ? new Date(campus._gps.timestamp).toISOString() : new Date().toISOString();
 
     const attendanceRecord = {
       ...existing,
+      date: new Date(now.getTime() + 7 * 3600000).toISOString().slice(0, 10),
       status,
       checkinTime: timeString,
       checkinMethod: method,
@@ -860,7 +861,7 @@ const AppState = {
     this.attendance[studentId] = attendanceRecord;
     this.logAudit(`Check-in Sekolah oleh ${this.currentUser.name} (${status.toUpperCase()}, ${distance}m)${campus && campus.name ? ' @ ' + campus.name : ''}`);
     this.saveState();
-    const todayDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+    const todayDate = attendanceRecord.date;
     if (window.SupabaseBackend && SupabaseBackend.auth.currentUser) {
       try {
         await SupabaseBackend.writeAttendanceRecord(studentId, todayDate, status, this.attendance[studentId]);
@@ -889,8 +890,15 @@ const AppState = {
 
       this.attendance[studentId] = attendanceRecord;
       this.saveState();
-      SupabaseBackend.writeAttendanceRecord(studentId, todayDate, status, attendanceRecord)
-        .catch(error => console.warn('Cloud sync status update failed:', error));
+      try {
+        await SupabaseBackend.writeAttendanceRecord(studentId, todayDate, status, { ...attendanceRecord, cloudSync: 'success', cloudSyncMessage: null });
+        attendanceRecord.cloudSync = 'success';
+        attendanceRecord.cloudSyncMessage = null;
+      } catch (error) {
+        attendanceRecord.cloudSync = 'failed';
+        attendanceRecord.cloudSyncMessage = error.message || 'Status belum tersimpan ke database.';
+      }
+      this.saveState();
     }
     return {
       success: true,
@@ -904,8 +912,51 @@ const AppState = {
       gpsAccuracy: this.attendance[studentId].gpsAccuracy || null,
       gpsTimestamp: this.attendance[studentId].gpsTimestamp || null,
       moncerSync: attendanceRecord.moncerSync || null,
+      cloudSync: attendanceRecord.cloudSync || null,
       moncerMessage: attendanceRecord.moncerMessage || null
     };
+  },
+
+  async retryMoncerSync() {
+    if (this.moncerRetryBusy || this.currentUser?.role !== 'siswa') return;
+    const studentId = this.currentUser.id;
+    const record = this.attendance[studentId];
+    const today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+    if (!record?.checkinTime || (record.date || this.attendanceDate) !== today) {
+      alert('Hanya check-in hari ini yang dapat dicoba ulang. Absensi lama harus diperiksa admin.');
+      return;
+    }
+    if (!window.SupabaseBackend?.auth.currentUser) { alert('Silakan login kembali sebelum sinkronisasi.'); return; }
+    this.moncerRetryBusy = true;
+    // Preserve the original check-in, even if a realtime snapshot replaces the view.
+    const updated = { ...record };
+    try {
+      if (updated.moncerSync !== 'success') {
+        try {
+          const result = await SupabaseBackend.syncMoncerAttendance(this.currentUser.nis, updated);
+          updated.moncerSync = 'success';
+          updated.moncerSyncedAt = new Date().toISOString();
+          updated.moncerMessage = result.message;
+        } catch (error) {
+          updated.moncerSync = 'failed';
+          updated.moncerMessage = error.message || 'Moncer belum dapat diverifikasi.';
+        }
+      }
+      try {
+        await SupabaseBackend.writeAttendanceRecord(studentId, today, updated.status, { ...updated, cloudSync: 'success', cloudSyncMessage: null });
+        updated.cloudSync = 'success';
+        updated.cloudSyncMessage = null;
+      } catch (error) {
+        updated.cloudSync = 'failed';
+        updated.cloudSyncMessage = error.message;
+      }
+      this.attendance[studentId] = updated;
+      this.saveState();
+      alert(`Moncer: ${updated.moncerSync === 'success' ? 'terverifikasi' : updated.moncerMessage}\nDatabase MIPHA: ${updated.cloudSync === 'success' ? 'tersimpan' : 'gagal disimpan; coba ulang'}`);
+    } finally {
+      this.moncerRetryBusy = false;
+      this.render({ silent: true, preserveUi: true });
+    }
   },
 
   generateMonthlyAttendanceSeed() {
@@ -1613,7 +1664,9 @@ const AppState = {
         </div>
         ${att.checkinTime ? `<div class="moncer-sync-status ${att.moncerSync || 'pending'}">
           <b>${att.moncerSync === 'success' ? '✅ Terverifikasi di Moncer' : att.moncerSync === 'failed' ? '⚠️ Belum masuk Moncer' : '⏳ Sinkronisasi Moncer'}</b>
-          <span>${att.moncerMessage || 'Menunggu konfirmasi dari server Moncer.'}</span>
+          <span>${String(att.moncerMessage || 'Menunggu konfirmasi dari server Moncer.').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))}</span>
+          <span>Database MIPHA: ${att.cloudSync === 'failed' ? '⚠️ Gagal disimpan, coba ulang' : att.cloudSync === 'success' ? 'Tersimpan' : 'Belum dikonfirmasi'}</span>
+          ${att.moncerSync !== 'success' || att.cloudSync !== 'success' ? '<button id="btn-retry-moncer" type="button">Coba sinkronisasi lagi</button>' : ''}
         </div>` : ''}
       </div>
 
@@ -2928,6 +2981,12 @@ const AppState = {
       };
     }
 
+    const retryMoncer = document.getElementById('btn-retry-moncer');
+    if (retryMoncer) retryMoncer.onclick = async () => {
+      retryMoncer.disabled = true;
+      retryMoncer.textContent = 'Memeriksa Moncer…';
+      try { await this.retryMoncerSync(); } finally { retryMoncer.disabled = false; retryMoncer.textContent = 'Coba sinkronisasi lagi'; }
+    };
     const btnGps = document.getElementById('btn-do-gps-checkin');
     if (btnGps) {
       btnGps.onclick = async () => {
@@ -2942,7 +3001,7 @@ const AppState = {
           if (res.success) {
             resultEl.style.color = 'var(--status-success)';
             resultEl.innerHTML = `📍 Posisi: <b>${res.latitude?.toFixed(6) || '-'}, ${res.longitude?.toFixed(6) || '-'}</b><br>Nearest: <b>${res.campusName || '-'}</b> • Jarak: <b>${res.distance}m</b> • Akurasi GPS: <b>${res.gpsAccuracy ? Math.round(res.gpsAccuracy) + 'm' : '-'}</b> • <b>Inside Radius</b>`;
-            alert(`✅ Check-in GPS Berhasil! (${res.distance}m dari sekolah) Jam: ${res.time}`);
+            alert(`Check-in jam ${res.time}.\nMIPHA: ${res.cloudSync === 'success' ? 'tersimpan' : 'belum tersimpan di cloud'}.\nMoncer: ${res.moncerSync === 'success' ? 'terverifikasi' : 'belum terverifikasi; lihat status di Beranda'}.`);
             this.switchView('dashboard');
           } else {
             resultEl.style.color = 'var(--status-danger)';
@@ -2952,7 +3011,7 @@ const AppState = {
           }
         } else {
           if (res.success) {
-            alert(`✅ Check-in GPS Berhasil! (${res.distance}m dari sekolah) Jam: ${res.time}`);
+            alert(`Check-in jam ${res.time}.\nMIPHA: ${res.cloudSync === 'success' ? 'tersimpan' : 'belum tersimpan di cloud'}.\nMoncer: ${res.moncerSync === 'success' ? 'terverifikasi' : 'belum terverifikasi; lihat status di Beranda'}.`);
             this.switchView('dashboard');
           } else {
             alert('❌ ' + res.message);
@@ -2967,7 +3026,7 @@ const AppState = {
         const pinInput = document.getElementById('input-pin-backup').value;
         const res = await this.performCheckin('nis', 0, pinInput);
         if (res && res.success) {
-          alert(`✅ Check-in NIS Berhasil! Jam: ${res.time}`);
+          alert(`Check-in jam ${res.time}.\nMIPHA: ${res.cloudSync === 'success' ? 'tersimpan' : 'belum tersimpan di cloud'}.\nMoncer: ${res.moncerSync === 'success' ? 'terverifikasi' : 'belum terverifikasi; lihat status di Beranda'}.`);
           this.switchView('dashboard');
         } else if (res && res.message) {
           alert(res.message);
