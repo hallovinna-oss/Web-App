@@ -15,15 +15,35 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
   return Math.round(earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-function resolveAttendanceCode(lookupResult, nis) {
-  const rows = Array.isArray(lookupResult?.data) ? lookupResult.data : [];
-  const matched = rows.find(item =>
-    String(item.nisn || item.nis || '').trim() === String(nis).trim()
-    || String(item.kode_absen || item.qr_codena || '').trim() === String(nis).trim()
-  );
-  if (!matched) return null;
-  const code = String(matched.kode_absen || matched.qr_codena || '').trim();
-  return code ? { code, student: matched } : null;
+const MONCER_API_URL = 'https://absen.mipha.sch.id/api.php';
+
+function resolveApiUrl(configured) {
+  const url = String(configured || '').trim().replace(/\/$/, '');
+  if (!url || url === MONCER_API_URL) return MONCER_API_URL;
+  throw Object.assign(new Error('Alamat API Moncer tidak sesuai domain presensi sekolah. Periksa MONCER_API_BASE_URL.'), { statusCode: 503 });
+}
+
+function jakartaDate(now = new Date()) {
+  return new Date(now.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+async function requestMoncer(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, { ...options, redirect: 'error', signal: controller.signal });
+    let result;
+    try { result = await response.json(); } catch { throw Object.assign(new Error('API Moncer mengembalikan respons bukan JSON.'), { statusCode: 502 }); }
+    if (!response.ok && response.status !== 404) throw Object.assign(new Error(`API Moncer gagal (${response.status}). Periksa koneksi dan API key.`), { statusCode: 502 });
+    return { response, result };
+  } finally { clearTimeout(timeout); }
+}
+
+function verifiedArrival(result, code, date) {
+  const data = result?.data;
+  return result?.success === true && String(data?.kode_absen || '') === code
+    && data?.tanggal === date && /^\d{2}:\d{2}(?::\d{2})?$/.test(String(data?.jam_datang || ''))
+    && !/^00:00(?::00)?$/.test(data.jam_datang);
 }
 
 exports.handler = async event => {
@@ -31,6 +51,7 @@ exports.handler = async event => {
   try {
     const user = await requireSupabaseUser(event);
     const input = JSON.parse(event.body || '{}');
+    if (input.date && input.date !== jakartaDate()) return json(422, { error: 'Absensi hari sebelumnya tidak boleh dikirim sebagai kehadiran hari ini.' });
     const nis = String(input.nis || '').trim();
     const method = input.method === 'nis' ? 'nis' : 'gps';
     const latitude = Number(input.latitude);
@@ -59,51 +80,39 @@ exports.handler = async event => {
     }
 
     const apiKey = String(process.env.MONCER_API_KEY || '').trim();
-    const baseUrl = String(process.env.MONCER_API_BASE_URL || 'https://absen.mipha.sch.id/api.php').trim();
+    const baseUrl = resolveApiUrl(process.env.MONCER_API_BASE_URL);
     if (!apiKey) return json(503, { error: 'Integrasi Moncer belum dikonfigurasi.' });
 
     const apiHeaders = { 'X-API-Key': apiKey };
-    const lookupTarget = new URL(baseUrl);
-    lookupTarget.searchParams.set('action', 'cari');
-    lookupTarget.searchParams.set('q', nis);
-    lookupTarget.searchParams.set('limit', '20');
-    const lookupResponse = await fetch(lookupTarget, { headers: apiHeaders });
-    const lookupResult = await lookupResponse.json().catch(() => ({}));
-    const resolvedStudent = resolveAttendanceCode(lookupResult, nis);
-    if (!resolvedStudent) {
-      return json(404, { error: `NIS ${nis} tidak ditemukan pada data Moncer. Hubungi admin untuk memeriksa kode absennya.` });
+    // School configuration: the attendance code is the authenticated student's NIS.
+    // Do not search NISN or translate to a different card code.
+    const attendanceCode = nis;
+
+    const date = jakartaDate();
+    const verifyTarget = new URL(baseUrl);
+    verifyTarget.searchParams.set('action', 'cek_presensi');
+    verifyTarget.searchParams.set('uid', attendanceCode);
+    verifyTarget.searchParams.set('tanggal', date);
+    const before = await requestMoncer(verifyTarget, { headers: apiHeaders });
+    if (verifiedArrival(before.result, attendanceCode, date)) {
+      return json(200, { success: true, verified: true, alreadyPresent: true, message: 'Check-in hari ini sudah terverifikasi di Moncer; tidak dikirim ulang.', data: before.result.data });
     }
-    const attendanceCode = resolvedStudent.code;
+    if (before.response.status !== 404) return json(502, { error: 'Status awal presensi Moncer belum dapat dipastikan. Pengiriman dibatalkan untuk mencegah presensi ganda.' });
 
     const target = new URL(baseUrl);
     target.searchParams.set('action', 'absen');
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    let response;
-    try {
-      response = await fetch(target, {
+    const { response, result } = await requestMoncer(target, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...apiHeaders },
         body: JSON.stringify(method === 'gps' ? { kode: attendanceCode, latitude, longitude } : { kode: attendanceCode }),
-        signal: controller.signal
       });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success === false) {
+    if (!response.ok || result.success !== true) {
       const message = result.message || result.error || `Moncer menolak presensi (${response.status}).`;
       return json(response.status >= 400 && response.status < 500 ? response.status : 502, { error: message });
     }
 
-    const verifyTarget = new URL(baseUrl);
-    verifyTarget.searchParams.set('action', 'cek_presensi');
-    verifyTarget.searchParams.set('uid', attendanceCode);
-    verifyTarget.searchParams.set('tanggal', new Date().toISOString().slice(0, 10));
-    const verifyResponse = await fetch(verifyTarget, { headers: apiHeaders });
-    const verifyResult = await verifyResponse.json().catch(() => ({}));
-    if (!verifyResponse.ok || verifyResult.success !== true || !verifyResult.data?.jam_datang) {
+    const { response: verifyResponse, result: verifyResult } = await requestMoncer(verifyTarget, { headers: apiHeaders });
+    if (!verifyResponse.ok || !verifiedArrival(verifyResult, attendanceCode, date)) {
       return json(502, { error: 'Moncer merespons, tetapi presensi belum terverifikasi pada rekapan Moncer.' });
     }
 
@@ -131,4 +140,4 @@ exports.handler = async event => {
   }
 };
 
-exports._test = { distanceMeters, resolveAttendanceCode };
+exports._test = { distanceMeters, resolveApiUrl, jakartaDate, verifiedArrival };
